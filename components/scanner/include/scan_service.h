@@ -11,6 +11,13 @@
 //           A 150 dpi scan kept whole in the buffer; the browser can leave and
 //           fetch it later from GET /scan/last.jpg (until the buffer is reused).
 // Also: GET /scan (the page), GET /scan/status (JSON), POST /scan/cancel.
+//
+// eSCL / AirScan (Mopria eSCL, as macOS Image Capture and sane-airscan use it)
+// under /eSCL: ScannerCapabilities, ScannerStatus, POST ScanJobs (scan
+// settings XML -> 201 + Location), ScanJobs/<id>/NextDocument (the JPEG,
+// streamed while it is scanned, like stream mode; 404 once delivered),
+// ScanJobs/<id>/ScanImageInfo, DELETE ScanJobs/<id>. Platen, RGB24, JPEG,
+// 75/150/300/600 dpi, any area. The platform announces _uscan._tcp.
 // One scan at a time; the device is shared with printing (open() fails while
 // a print job runs, and print jobs are refused while a scan runs).
 #pragma once
@@ -30,6 +37,8 @@ typedef struct {
     void (*close)(void *ctx);
     pixma_io_t io;                      // bulk transfers to the scanner interface
     void (*state)(void *ctx, bool scanning);    // e.g. LED
+    const char *make_model;             // eSCL MakeAndModel, e.g. "Canon MG2500 series"
+    const char *uuid;                   // eSCL UUID (the printer's, so clients pair them)
     void *ctx;
 } scan_config_t;
 

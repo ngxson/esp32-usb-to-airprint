@@ -148,7 +148,8 @@ void app_main(void)
     sbuf_init(heap_caps_malloc(SCAN_BUF_SIZE, MALLOC_CAP_8BIT), SCAN_BUF_SIZE);
     ESP_LOGI(TAG, "shared buffer %s, free heap %lu (largest block %u)", sbuf_size() ? "allocated" : "MISSING",
              (unsigned long)esp_get_free_heap_size(), (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
-    static scan_config_t scfg = {.open = scan_open, .close = scan_close};
+    static scan_config_t scfg = {.open = scan_open, .close = scan_close, .make_model = "Canon MG2500 series",
+                                 .uuid = "a4d1e9b2-0b6f-4c3e-9d2a-000000000000"};
     scfg.io = fake_scanner_io(&s_scanner);
     scan_service_init(&scfg);
     static const airprint_config_t cfg = {

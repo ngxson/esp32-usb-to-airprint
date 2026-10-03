@@ -4,7 +4,8 @@ Turns a USB-only Canon PIXMA MG2500-series printer into a wireless AirPrint
 printer. An ESP32-S3 board plugs into the printer's USB port and joins your
 WiFi. iPhone, iPad and Mac then find the printer and print to it natively, no
 drivers or apps needed. Android (Mopria) and Linux (CUPS, IPP Everywhere)
-work too. The scanner works from any browser.
+work too. The scanner works from any browser, and on a Mac from Image
+Capture and Preview (AirScan / eSCL).
 
 ## What you need
 
@@ -73,6 +74,10 @@ Put the page on the glass and open `/scan` in a browser. Two modes:
 
 Scans are colour JPEGs. The printer does one thing at a time: print jobs
 wait while it scans, and a scan can't start while it prints.
+
+On a Mac, the scanner also shows up in **Image Capture** and in Preview
+(File → Import from Scanner) under the printer's name, with no driver to
+install. Linux (sane-airscan) and Windows find it the same way.
 
 ## Leaving the board at the printer (MODE=debug)
 

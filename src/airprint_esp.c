@@ -397,7 +397,7 @@ static esp_err_t start_mdns(const char *hostname)
         {"Transparent", "T"},
         {"Binary", "T"},
         {"TBCP", "F"},
-        {"Scan", "F"},
+        {"Scan", "T"},     // the eSCL scanner below, same UUID
         {"Fax", "F"},
     };
     err = mdns_service_add(PRINTER_NAME, "_ipp", "_tcp", IPP_PORT, txt, sizeof(txt) / sizeof(txt[0]));
@@ -406,6 +406,27 @@ static esp_err_t start_mdns(const char *hostname)
     // "_universal" is what iOS looks for; "_print" is IPP Everywhere
     mdns_service_subtype_add_for_host(PRINTER_NAME, "_ipp", "_tcp", NULL, "_universal");
     mdns_service_subtype_add_for_host(PRINTER_NAME, "_ipp", "_tcp", NULL, "_print");
+
+    // eSCL scanner (AirScan): macOS Image Capture / Preview, sane-airscan, Windows
+    char icon[96];
+    snprintf(icon, sizeof(icon), "http://%s.local/icon.png", hostname);
+    mdns_txt_item_t scan_txt[] = {
+        {"txtvers", "1"},
+        {"vers", "2.0"},
+        {"rs", "eSCL"},
+        {"ty", s_cfg.make_model},
+        {"note", ""},
+        {"pdl", "image/jpeg"},
+        {"cs", "color"},
+        {"is", "platen"},
+        {"duplex", "F"},
+        {"UUID", s_uuid},
+        {"adminurl", adminurl},
+        {"representation", icon},
+    };
+    err = mdns_service_add(PRINTER_NAME, "_uscan", "_tcp", WEB_PORT, scan_txt, sizeof(scan_txt) / sizeof(scan_txt[0]));
+    if (err != ESP_OK)
+        ESP_LOGW(TAG, "cannot announce the scanner: %s", esp_err_to_name(err));
     ESP_LOGI(TAG, "announced \"%s\" as %s.local:%d", PRINTER_NAME, hostname, IPP_PORT);
     return ESP_OK;
 }
@@ -445,6 +466,8 @@ esp_err_t airprint_esp_start(const char *hostname, void (*on_job_state)(bool pri
         .close = scan_close,
         .io = {.write = scan_write, .read = scan_read, .sleep_ms = scan_sleep},
         .state = job_state,
+        .make_model = "Canon MG2500 series",
+        .uuid = s_uuid,
     };
     s_cfg.http_handler = http_handler;
     s_cfg.home_html = SCAN_HOME_HTML;

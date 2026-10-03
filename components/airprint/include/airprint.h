@@ -52,8 +52,8 @@ typedef struct {
     void (*job_cancel)(void *ctx);              // asynchronous cancel of the running job
     void (*job_state)(void *ctx, bool printing);    // e.g. LED
     void (*identify)(void *ctx);                // Identify-Printer (blink LED)
-    // Extra HTTP resources (scanner, debug downloads). Called for GET/HEAD
-    // requests and for POSTs outside /ipp; path includes the query string.
+    // Extra HTTP resources (scanner, debug downloads). Called for GET/HEAD/
+    // DELETE requests and for POSTs outside /ipp; path includes the query string.
     // Return true once a response was sent with the airprint_http_* calls
     // below, false for a 404. Runs on the connection's thread.
     bool (*http_handler)(void *ctx, airprint_http_t *h, const char *method, const char *path);
@@ -65,8 +65,14 @@ typedef struct {
 int airprint_start(const airprint_config_t *cfg);
 
 // --- responses from http_handler
-// A complete response.
+// A complete response; extra_headers are full "Name: value\r\n" lines or NULL.
 void airprint_http_send(airprint_http_t *h, const char *status, const char *type, const void *body, size_t len);
+void airprint_http_send_ex(airprint_http_t *h, const char *status, const char *type, const char *extra_headers,
+                           const void *body, size_t len);
+// Reads up to max bytes of the request body; returns the count (0 at the end) or < 0.
+int airprint_http_read_body(airprint_http_t *h, void *buf, size_t max);
+// The request's Host header ("" if none), e.g. "canon-mg2500.local:80".
+const char *airprint_http_host(airprint_http_t *h);
 // A streamed 200 response of unknown length (chunked); extra_headers are
 // full "Name: value\r\n" lines or NULL. Calls return < 0 once the client is gone.
 int airprint_http_stream_begin(airprint_http_t *h, const char *type, const char *extra_headers);

@@ -250,19 +250,54 @@ static void drain_body(conn_t *c)
         c->keep_alive = false;
 }
 
-static void send_http(conn_t *c, const char *status, const char *type, const void *body, size_t len)
+static void send_http_ex(conn_t *c, const char *status, const char *type, const char *extra_headers,
+                         const void *body, size_t len)
 {
-    char hdr[256];
+    char hdr[512];
     int n = snprintf(hdr, sizeof(hdr),
-                     "HTTP/1.1 %s\r\nContent-Type: %s\r\nContent-Length: %u\r\nConnection: %s\r\n\r\n", status,
-                     type, (unsigned)len, c->keep_alive ? "keep-alive" : "close");
+                     "HTTP/1.1 %s\r\nContent-Type: %s\r\nContent-Length: %u\r\n%sConnection: %s\r\n\r\n", status,
+                     type, (unsigned)len, extra_headers ? extra_headers : "", c->keep_alive ? "keep-alive" : "close");
+    if (n >= (int)sizeof(hdr)) {
+        c->keep_alive = false;
+        return;
+    }
     if (send_all(c->fd, hdr, n) == 0 && len)
         send_all(c->fd, body, len);
+}
+
+static void send_http(conn_t *c, const char *status, const char *type, const void *body, size_t len)
+{
+    send_http_ex(c, status, type, NULL, body, len);
 }
 
 void airprint_http_send(airprint_http_t *c, const char *status, const char *type, const void *body, size_t len)
 {
     send_http(c, status, type, body, len);
+}
+
+void airprint_http_send_ex(airprint_http_t *c, const char *status, const char *type, const char *extra_headers,
+                           const void *body, size_t len)
+{
+    send_http_ex(c, status, type, extra_headers, body, len);
+}
+
+int airprint_http_read_body(airprint_http_t *c, void *buf, size_t max)
+{
+    size_t got = 0;
+    while (got < max) {
+        int k = body_read(c, (uint8_t *)buf + got, max - got);
+        if (k < 0)
+            return -1;
+        if (k == 0)
+            break;
+        got += (size_t)k;
+    }
+    return (int)got;
+}
+
+const char *airprint_http_host(airprint_http_t *c)
+{
+    return c->host;
 }
 
 int airprint_http_stream_begin(airprint_http_t *c, const char *type, const char *extra_headers)
@@ -1387,10 +1422,13 @@ static void *conn_thread(void *arg)
         bool ipp_path = !strcmp(c->path, "/") || !strncmp(c->path, "/ipp", 4);
         if (!strcmp(c->method, "POST") && (ipp_path || !s_cfg->http_handler)) {
             handle_ipp(c);
-        } else if (!strcmp(c->method, "POST")) {
-            drain_body(c);
-            if (!s_cfg->http_handler(s_cfg->ctx, c, c->method, c->path))
+        } else if (!strcmp(c->method, "POST") || !strcmp(c->method, "DELETE")) {
+            // the handler may read the body (airprint_http_read_body); the rest is dropped after
+            if (!s_cfg->http_handler || !s_cfg->http_handler(s_cfg->ctx, c, c->method, c->path)) {
+                drain_body(c);
                 send_http(c, "404 Not Found", "text/plain", "not found", 9);
+            }
+            drain_body(c);
         } else if (!strcmp(c->method, "GET") || !strcmp(c->method, "HEAD")) {
             drain_body(c);
             if (!s_cfg->http_handler || !s_cfg->http_handler(s_cfg->ctx, c, c->method, c->path))

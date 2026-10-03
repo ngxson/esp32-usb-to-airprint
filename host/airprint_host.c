@@ -89,6 +89,7 @@ static void scan_close(void *ctx)
 
 static bool http_handler(void *ctx, airprint_http_t *h, const char *method, const char *path)
 {
+    fprintf(stderr, "host: %s %s (Host: %s)\n", method, path, airprint_http_host(h));
     return scan_service_http(h, method, path);
 }
 
@@ -119,7 +120,8 @@ int main(int argc, char **argv)
     if (fake_scanner_init(&s_scanner, kbps * 1024) != 0)
         return 1;
     sbuf_init(malloc(buf_kb * 1024), buf_kb * 1024);
-    static scan_config_t scfg = {.open = scan_open, .close = scan_close};
+    static scan_config_t scfg = {.open = scan_open, .close = scan_close, .make_model = "Canon MG2500 series",
+                                 .uuid = "a4d1e9b2-0b6f-4c3e-9d2a-5e8f7c6b1a00"};
     scfg.io = fake_scanner_io(&s_scanner);
     scan_service_init(&scfg);
     fprintf(stderr, "host: scanner emulated at %u KB/s, %u KB buffer\n", kbps, (unsigned)buf_kb);

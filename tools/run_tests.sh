@@ -118,6 +118,29 @@ if [ -n "${AIRPRINT:-}" ]; then
     sleep 3; curl -s -X POST $S/cancel > /dev/null; wait $CLIENT || true
     echo "canceled: $(curl -s $S/status | grep -oE '"state":"[a-z]+"'), $(python3 tools/check_jpeg.py $OUT/http150.jpg --size 1240x1754 | cut -d: -f2-)"
     kill $SERVER; wait $SERVER 2>/dev/null || true
+
+    echo "== eSCL (as macOS Image Capture uses it)"
+    (cd host && FAKE_SCANNER_KBPS=0 exec ./airprint_host $PORT >> out/airprint-scan.log 2>&1) &
+    SERVER=$!
+    sleep 1
+    E=http://localhost:$PORT/eSCL
+    python3 -c "import sys, xml.etree.ElementTree as t; t.fromstring(sys.stdin.read())" < <(curl -s $E/ScannerCapabilities) \
+        && echo "capabilities: well-formed XML" || echo "capabilities: BAD XML"
+    # a 5 x 4 in region at 300 dpi, 1 in from the left, 0.5 in from the top
+    SETTINGS='<scan:ScanSettings xmlns:scan="http://schemas.hp.com/imaging/escl/2011/05/03" xmlns:pwg="http://www.pwg.org/schemas/2010/12/sm"><pwg:Version>2.0</pwg:Version><scan:Intent>TextAndGraphic</scan:Intent><pwg:ScanRegions pwg:MustHonor="true"><pwg:ScanRegion><pwg:ContentRegionUnits>escl:ThreeHundredthsOfInches</pwg:ContentRegionUnits><pwg:Width>1500</pwg:Width><pwg:Height>1200</pwg:Height><pwg:XOffset>300</pwg:XOffset><pwg:YOffset>150</pwg:YOffset></pwg:ScanRegion></pwg:ScanRegions><pwg:DocumentFormat>image/jpeg</pwg:DocumentFormat><pwg:InputSource>Platen</pwg:InputSource><scan:ColorMode>RGB24</scan:ColorMode><scan:XResolution>300</scan:XResolution><scan:YResolution>300</scan:YResolution></scan:ScanSettings>'
+    JOB=$(curl -s -D - -o /dev/null --data "$SETTINGS" $E/ScanJobs | tr -d '\r' | awk '/^Location:/ {print $2}')
+    curl -s -o $OUT/escl.jpg http://localhost:$PORT$JOB/NextDocument
+    host/scan_host scan 300 a4 $OUT/escl-full.jpg $OUT/escl-full.ppm >/dev/null 2>&1
+    python3 -c "from PIL import Image; Image.open('$OUT/escl-full.ppm').crop((300, 150, 1800, 1350)).save('$OUT/escl-ref.ppm')"
+    echo "region scan: $(python3 tools/check_jpeg.py $OUT/escl.jpg --ref $OUT/escl-ref.ppm --size 1500x1200 --dpi 300 --min-psnr 38 | cut -d: -f2-)"
+    rm -f $OUT/escl-full.ppm $OUT/escl-ref.ppm $OUT/escl-full.jpg
+    echo "second NextDocument: $(curl -s -o /dev/null -w '%{http_code}' http://localhost:$PORT$JOB/NextDocument) (404: one page)"
+    echo "job state: $(curl -s $E/ScannerStatus | grep -o '<pwg:JobState>[A-Za-z]*' | head -1 | cut -d'>' -f2)"
+    JOB=$(curl -s -D - -o /dev/null --data "$SETTINGS" $E/ScanJobs | tr -d '\r' | awk '/^Location:/ {print $2}')
+    echo "cancel a queued job: $(curl -s -o /dev/null -w '%{http_code}' -X DELETE http://localhost:$PORT$JOB)," \
+         "then its document: $(curl -s -o /dev/null -w '%{http_code}' http://localhost:$PORT$JOB/NextDocument)"
+    echo "document feeder: $(curl -s -o /dev/null -w '%{http_code}' --data "${SETTINGS/Platen/Feeder}" $E/ScanJobs) (409)"
+    kill $SERVER; wait $SERVER 2>/dev/null || true
     grep -h "protocol violations" host/out/airprint-scan.log | sort | uniq -c | sed 's/^ */  scanner closed: /'
     trap - EXIT
 fi

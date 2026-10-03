@@ -207,6 +207,21 @@ Reference CRC-32s (any change to these must be intentional):
   The printer's status polling pauses during a scan.
 - The page (`scan_page.h`) reads the stream with `fetch()` and redraws the
   partial JPEG from a Blob every 1.5 s; Save downloads the Blob.
+- eSCL / AirScan under `/eSCL` (same server, ports 80 and 631; mDNS
+  `_uscan._tcp` on port 80, `rs=eSCL`, the printer's UUID, and `Scan=T` in
+  the IPP record). Capabilities: platen 2552 x 3508 (1/300 in), RGB24,
+  JPEG, discrete 75/150/300/600 dpi. `POST ScanJobs` parses the settings
+  (region in 1/300 in, the lowest native dpi at least the requested one),
+  answers 201 + `Location: /eSCL/ScanJobs/<id>`; the scan only starts at
+  `NextDocument`, which streams the JPEG chunked (as AirSane does); the next
+  `NextDocument` is 404. `DELETE` cancels; jobs are kept in a ring of 4 for
+  `ScannerStatus`.
+- macOS (Image Capture, AirScanScanner 63.2 on macOS 26) seen on hardware:
+  capabilities, icon, `ScannerStatus` every 3 s, then `POST ScanJobs` with
+  `TextAndGraphic`, A4 region, `image/jpeg`, RGB24, then `NextDocument`, and
+  `DELETE` of the finished job. Canceling in Image Capture sends `DELETE`
+  mid-stream. A scripted ImageCaptureCore client never got as far as `POST`
+  (the driver polls status forever): test with Image Capture itself.
 - Tests: `scan_host selftest` runs the protocol against `fake_scanner`
   (busy, cancel, scanner errors, odd areas, pixel-exact lines; the fake flags
   any protocol violation, unread reply or unclosed session), JPEGs are
@@ -339,10 +354,11 @@ speed. The USB host still runs.
   IPPS, no authentication, IPv4 only. WiFi settings are compiled in.
 - The colour tuning (dot gain 0.25 CMY / 0.15 K, full black generation) has
   not been checked on paper yet.
-- Scanning: not yet tried on the real scanner; colour JPEG only, A4/Letter,
-  no eSCL. Expected to be limited by full-speed USB (about 0.5-1 MB/s of raw
-  RGB: 300 dpi A4 is 26 MB).
+- Scanning: colour JPEG only. 150 dpi A4 takes 15 s on the board (about 6 s
+  of warm-up and calibration); higher resolutions are limited by full-speed
+  USB (about 0.5-1 MB/s of raw RGB: 300 dpi A4 is 26 MB). Paper comes out
+  light grey (gamma 2.2, no white point correction).
 - Ideas: buffer converted pages in PSRAM so clients can disconnect early;
-  eSCL/AirScan on top of the scan service; the scanner's own JPEG mode (SANE
+  PDF output for eSCL (a JPEG wrapped in a one-page PDF); the scanner's own JPEG mode (SANE
   only uses it for ADF models: `0xd820` byte 3 = 1, byte 0x21 = 0x83); an SD
   card for large spools (pinout in `docs/sd_card_pinout.png`).

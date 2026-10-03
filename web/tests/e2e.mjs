@@ -150,6 +150,58 @@ try {
   await shot(page, 'viewer');
   await page.keyboard.press('Escape');
 
+  // Files: grouped by day; pick files in order -> one PDF; delete several
+  await page.click('a[href="#/files"]');
+  await page.getByRole('heading', { name: /^Today/ }).waitFor();
+  await page.getByRole('button', { name: 'Select', exact: true }).click();
+  await page.locator('.tile', { hasText: 'color.jpg' }).locator('.thumb').click();
+  await page.locator('.tile', { hasText: 'document-a4.pdf' }).locator('.thumb').click();
+  await page.getByText('2 selected').waitFor();
+  await shot(page, 'files-select');
+  const before2 = await page.locator('.tile').count();
+  await page.locator('.bulk').getByRole('button', { name: 'Save as PDF' }).click();
+  // (an earlier export's toast may still show: wait for the file itself)
+  await page.waitForFunction((n) => document.querySelectorAll('.tile').length === n, before2 + 1, { timeout: 120000 });
+  const merged = await page.evaluate(async () => {
+    const all = await new Promise((res) => {
+      const r = indexedDB.open('printer-web');
+      r.onsuccess = () => {
+        const q = r.result.transaction('files').objectStore('files').getAll();
+        q.onsuccess = () => res(q.result);
+      };
+    });
+    return all.filter((f) => f.source === 'process').sort((a, b) => b.created - a.created)[0];
+  });
+  assert.equal(merged.pages, 5, 'photo (1 page) + PDF (4 pages) in one PDF');
+  // a file from yesterday gets its own group
+  await page.evaluate(async () => {
+    await new Promise((res) => {
+      const r = indexedDB.open('printer-web');
+      r.onsuccess = () => {
+        const st = r.result.transaction('files', 'readwrite').objectStore('files');
+        const q = st.getAll();
+        q.onsuccess = () => {
+          const f = q.result.find((x) => x.name === 'color.jpg');
+          f.created -= 86400000;
+          st.put(f).onsuccess = res;
+        };
+      };
+    });
+  });
+  await page.reload();
+  await page.getByRole('heading', { name: /^Yesterday/ }).waitFor();
+  await shot(page, 'files-days');
+  // select the whole of today, then delete it
+  await page.getByRole('button', { name: /Select all of Today/ }).click();
+  const today = await page.locator('section.day').first().locator('.tile').count();
+  await page.getByText(`${today} selected`).waitFor();
+  page.once('dialog', (d) => d.accept());
+  await page.locator('.bulk').getByRole('button', { name: 'Delete' }).click();
+  await page.getByText(`Deleted ${today} file`).waitFor();
+  assert.equal(await page.getByRole('heading', { name: /^Today/ }).count(), 0);
+  await page.getByRole('heading', { name: /^Yesterday/ }).waitFor();
+  step('files: by day; picked files -> one PDF in order; a whole day selected and deleted');
+
   // phone
   const phone = await browser.newContext({
     viewport: { width: 390, height: 844 },

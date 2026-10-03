@@ -52,11 +52,17 @@ export function updateItem(id: string, fn: (it: Item) => Item) {
   setItems(work.items.map((it) => (it.id === id ? fn(it) : it)));
 }
 
-export async function addFilesToWork(fs: StoredFile[]) {
+// every page of the files, in order
+export function pageItems(fs: StoredFile[]): Item[] {
   const items: Item[] = [];
   for (const f of fs)
     for (let p = 0; p < (f.pages || 1); p++)
       items.push({ id: db.newId('p'), kind: 'page', ref: { fileId: f.id, page: p, rot: 0, crop: null } });
+  return items;
+}
+
+export async function addFilesToWork(fs: StoredFile[]) {
+  const items = pageItems(fs);
   setItems([...work.items, ...items]);
   return items.length;
 }

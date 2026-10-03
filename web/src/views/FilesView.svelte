@@ -8,6 +8,10 @@
   import Ellipsis from '@lucide/svelte/icons/ellipsis';
   import Inbox from '@lucide/svelte/icons/inbox';
   import LoaderCircle from '@lucide/svelte/icons/loader-circle';
+  import SquareCheck from '@lucide/svelte/icons/square-check';
+  import FileDown from '@lucide/svelte/icons/file-down';
+  import X from '@lucide/svelte/icons/x';
+  import Check from '@lucide/svelte/icons/check';
   import {
     addFile,
     download,
@@ -19,7 +23,7 @@
     thumbUrl,
     type StoredFile,
   } from '../lib/files.svelte';
-  import { addFilesToWork } from '../lib/process.svelte';
+  import { addFilesToWork, exportPdf, pageItems } from '../lib/process.svelte';
   import { go, openPrint, openViewer, toast } from '../lib/ui.svelte';
 
   let filter = $state<'all' | 'scan' | 'upload' | 'process'>('all');
@@ -29,6 +33,94 @@
   let input: HTMLInputElement;
 
   const shown = $derived(filter === 'all' ? files.list : files.list.filter((f) => f.source === filter));
+
+  // bulk actions: files are numbered in the order they were picked, which is
+  // the order of the pages in the PDF
+  let selecting = $state(false);
+  let selected = $state<string[]>([]);
+  let busy = $state(false);
+  let progress = $state(0);
+  const chosen = $derived(
+    selected.map((id) => files.list.find((f) => f.id === id)).filter((f): f is StoredFile => !!f),
+  );
+
+  function toggle(f: StoredFile) {
+    selected = selected.includes(f.id) ? selected.filter((x) => x !== f.id) : [...selected, f.id];
+  }
+
+  // grouped by day, newest first, as Google Photos does
+  const groups = $derived.by(() => {
+    const out: { key: string; label: string; files: StoredFile[] }[] = [];
+    for (const f of shown) {
+      const d = new Date(f.created);
+      const key = d.toDateString();
+      if (out.at(-1)?.key !== key) out.push({ key, label: dayLabel(d), files: [] });
+      out.at(-1)!.files.push(f);
+    }
+    return out;
+  });
+
+  function dayLabel(d: Date): string {
+    const today = new Date();
+    const yesterday = new Date(today.getFullYear(), today.getMonth(), today.getDate() - 1);
+    if (d.toDateString() === today.toDateString()) return 'Today';
+    if (d.toDateString() === yesterday.toDateString()) return 'Yesterday';
+    return d.toLocaleDateString(undefined, {
+      weekday: 'short',
+      day: 'numeric',
+      month: 'short',
+      year: d.getFullYear() === today.getFullYear() ? undefined : 'numeric',
+    });
+  }
+
+  // the day's check: picks all its files (or drops them when all are picked)
+  function toggleDay(fs: StoredFile[]) {
+    selecting = true;
+    const ids = fs.map((f) => f.id);
+    selected = ids.every((id) => selected.includes(id))
+      ? selected.filter((id) => !ids.includes(id))
+      : [...selected, ...ids.filter((id) => !selected.includes(id))];
+  }
+
+  function stopSelecting() {
+    selecting = false;
+    selected = [];
+  }
+
+  function selectAll() {
+    const ids = shown.map((f) => f.id).filter((id) => !selected.includes(id));
+    selected = ids.length ? [...selected, ...ids] : [];
+  }
+
+  async function bulkPdf() {
+    busy = true;
+    progress = 0;
+    try {
+      const f = await exportPdf(pageItems(chosen), { paper: 'original', dpi: 200, fallback: 'a4' }, (d, t) => (progress = d / t));
+      stopSelecting();
+      toast(`Saved ${f.name} to Files`, 'ok', [
+        { label: 'Print', run: () => openPrint(f) },
+        { label: 'Download', run: () => download(f.blob, f.name) },
+      ]);
+    } catch (e) {
+      toast(`Could not make the PDF: ${(e as Error).message}`, 'error');
+    } finally {
+      busy = false;
+    }
+  }
+
+  async function bulkDelete() {
+    const n = chosen.length;
+    if (!confirm(`Delete ${n} file${n === 1 ? '' : 's'} from this browser?`)) return;
+    busy = true;
+    try {
+      for (const f of chosen) await removeFile(f.id);
+      toast(`Deleted ${n} file${n === 1 ? '' : 's'}`);
+      stopSelecting();
+    } finally {
+      busy = false;
+    }
+  }
   const total = $derived(files.list.reduce((n, f) => n + f.size, 0));
 
   async function addAll(list: FileList | File[]) {
@@ -76,10 +168,9 @@
     toast(`${n} page${n === 1 ? '' : 's'} added to Process`, 'ok', [{ label: 'Open', run: () => go('process') }]);
   }
 
+  // the day is in the group's heading
   function when(t: number): string {
-    const d = new Date(t);
-    const today = new Date().toDateString() === d.toDateString();
-    return today ? d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : d.toLocaleDateString();
+    return new Date(t).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   }
 
   function kind(f: StoredFile): string {
@@ -107,6 +198,11 @@
       <h1>Files</h1>
       <p class="muted small">Kept in this browser only · {files.list.length} files · {formatSize(total)}</p>
     </div>
+    {#if files.list.length}
+      <button class="btn" class:on={selecting} onclick={() => (selecting ? stopSelecting() : (selecting = true))}>
+        {#if selecting}<X size={17} /> Done{:else}<SquareCheck size={17} /> Select{/if}
+      </button>
+    {/if}
     <button class="btn primary" onclick={() => input.click()}>
       {#if uploading}<LoaderCircle size={17} class="spin" />{:else}<Upload size={17} />{/if} Upload
     </button>
@@ -131,12 +227,33 @@
       <button class="btn" onclick={() => input.click()}><Upload size={17} /> Upload</button>
     </div>
   {:else}
-    <ul class="grid">
-      {#each shown as f (f.id)}
-        <li class="card tile">
-          <button class="thumb" onclick={() => openViewer(f)} aria-label="Open {f.name}">
+    {#each groups as g (g.key)}
+    {@const all = g.files.every((f) => selected.includes(f.id))}
+    <section class="day">
+    <div class="day-head">
+      <button
+        class="day-check"
+        class:on={selecting && all}
+        class:show={selecting}
+        onclick={() => toggleDay(g.files)}
+        aria-label="{all && selecting ? 'Unselect' : 'Select'} all of {g.label}"
+        title="Select the whole day"><Check size={14} /></button
+      >
+      <h2>{g.label} <span class="muted small">{g.files.length}</span></h2>
+    </div>
+    <ul class="grid" class:selecting>
+      {#each g.files as f (f.id)}
+        {@const n = selected.indexOf(f.id) + 1}
+        <li class="card tile" class:picked={n > 0}>
+          <button
+            class="thumb"
+            onclick={() => (selecting ? toggle(f) : openViewer(f))}
+            aria-label={selecting ? `${n ? 'Unselect' : 'Select'} ${f.name}` : `Open ${f.name}`}
+            aria-pressed={selecting ? n > 0 : undefined}
+          >
             {#if f.thumb}<img src={thumbUrl(f)} alt="" loading="lazy" />{/if}
             {#if f.type === 'application/pdf'}<span class="badge">PDF</span>{/if}
+            {#if selecting}<span class="pick">{n || ''}</span>{/if}
           </button>
           <div class="meta">
             <div class="row">
@@ -162,17 +279,39 @@
                 {/if}
               </div>
             </div>
+            {#if !selecting}
             <div class="row btns">
               <button class="btn primary grow" onclick={() => openPrint(f)}><Printer size={16} /> Print</button>
               <button class="btn" onclick={() => download(f.blob, f.name)} aria-label="Download"><Download size={16} /></button>
             </div>
+            {/if}
           </div>
         </li>
       {/each}
     </ul>
+    </section>
+    {/each}
   {/if}
   {#if dragging}
     <div class="overlay"><Upload size={36} /> Drop to add</div>
+  {/if}
+  {#if selecting}
+    <div class="bulk card">
+      <div class="grow">
+        <b>{chosen.length} selected</b>
+        <div class="muted small">
+          {chosen.length ? 'The PDF keeps the order you picked them in.' : 'Tap files to pick them.'}
+        </div>
+        {#if busy && progress}<div class="bar"><div style:width={`${progress * 100}%`}></div></div>{/if}
+      </div>
+      <button class="btn ghost" onclick={selectAll} disabled={busy}>
+        {selected.length && shown.every((f) => selected.includes(f.id)) ? 'None' : 'All'}
+      </button>
+      <button class="btn danger" onclick={bulkDelete} disabled={!chosen.length || busy}><Trash2 size={17} /> Delete</button>
+      <button class="btn primary" onclick={bulkPdf} disabled={!chosen.length || busy}>
+        {#if busy}<LoaderCircle size={17} class="spin" />{:else}<FileDown size={17} />{/if} Save as PDF
+      </button>
+    </div>
   {/if}
 </div>
 
@@ -269,6 +408,83 @@
   }
   .menu .danger {
     color: var(--err);
+  }
+  .day + .day {
+    margin-top: 26px;
+  }
+  .day-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 12px;
+  }
+  .day-head h2 {
+    font-size: 0.95rem;
+  }
+  .day-check {
+    display: grid;
+    place-items: center;
+    width: 22px;
+    height: 22px;
+    padding: 0;
+    border-radius: 50%;
+    border: 2px solid var(--muted);
+    background: transparent;
+    color: transparent;
+    cursor: pointer;
+    opacity: 0.55;
+  }
+  .day-head:hover .day-check,
+  .day-check.show {
+    opacity: 1;
+  }
+  .day-check.on {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: var(--accent-text);
+    opacity: 1;
+  }
+  .pick {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    display: grid;
+    place-items: center;
+    width: 26px;
+    height: 26px;
+    border-radius: 50%;
+    border: 2px solid var(--muted);
+    background: var(--surface);
+    font-size: 0.8rem;
+    font-weight: 700;
+  }
+  .picked .pick {
+    border-color: var(--accent);
+    background: var(--accent);
+    color: var(--accent-text);
+  }
+  .tile.picked {
+    outline: 2px solid var(--accent);
+    outline-offset: -1px;
+  }
+  .bulk {
+    position: sticky;
+    bottom: 12px;
+    z-index: 6;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 10px;
+    margin-top: 18px;
+    padding: 12px 14px;
+    box-shadow: var(--shadow-lg);
+  }
+  .bulk .bar {
+    margin-top: 6px;
+  }
+  .btn.on {
+    background: var(--accent-soft);
+    border-color: var(--accent);
   }
   .overlay {
     position: absolute;

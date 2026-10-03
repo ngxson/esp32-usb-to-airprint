@@ -495,6 +495,11 @@ Verified on the real scanner (2026-10-03): the first scan worked unchanged.
 - Files: IndexedDB (`printer-web`, stores `files` and `kv`) in each browser,
   nothing on the device. Each file keeps its blob, a JPEG thumbnail, its
   pages (PDF), pixel size and dpi (JFIF / PNG pHYs, below 75 means unknown).
+  The tab groups files by day (local date of `created`, newest first:
+  Today, Yesterday, "Mon, 28 Sep"); Select mode numbers files in the order
+  they are picked (a day's check picks the whole day) for Delete or Save as
+  PDF: every page of the picked files, in that order, through the Process
+  export at their own size ("as cropped", 200 dpi; PDF pages are rasterized).
 - Scans reach Files: every open page follows a kept scan as it grows
   (polling `last.jpg?from=` every 1.2 s), shows it, and saves it as
   `scan-<id>` with `add()`, which fails for a second tab of the same browser

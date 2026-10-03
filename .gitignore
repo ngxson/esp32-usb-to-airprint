@@ -21,6 +21,8 @@ host/bjl_host
 host/bjl_host.dSYM/
 host/scan_host
 host/scan_host.dSYM/
+host/airprint_host
+host/airprint_host.dSYM/
 host/out/
 host/*.prn
 host/*.png

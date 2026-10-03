@@ -6,7 +6,11 @@ your WiFi:
 
 - **Print** from iPhone, iPad and Mac (AirPrint), Android (Mopria) and Linux,
   with no drivers or apps.
-- **Scan** from any browser, or from Image Capture and Preview on a Mac.
+- **Scan** from any browser, from Image Capture and Preview on a Mac, or with
+  the button on the board.
+- **A web app** on your phone or computer: print PDFs and pictures, scan,
+  keep the files in the browser, and put pages together (rotate, crop, ID
+  card copies) into a PDF.
 
 ## What you need
 
@@ -15,7 +19,9 @@ your WiFi:
 - A Canon PIXMA MG2500-series printer (MG2500, MG2520, MG2540, MG2550, …).
 - A USB-C to USB-B printer cable.
 - A 2.4 GHz WiFi network.
-- A computer with [PlatformIO](https://platformio.org/) to build and flash.
+- A computer with [PlatformIO](https://platformio.org/) and
+  [Node.js](https://nodejs.org/) 22 or later to build and flash (the build
+  installs the web app's packages with `npm ci` the first time).
 
 ## Setup
 
@@ -39,24 +45,32 @@ your WiFi:
 
 ## Using it
 
-- **Print:** on an iPhone, Share → Print and pick the printer. On a Mac, add
-  it in System Settings → Printers & Scanners.
-- **Scan in a browser:** put the page on the glass and open
-  `http://canon-mg2500.local/scan` (your `HOSTNAME`).
-  - *Live to this browser* (150, 300 or 600 dpi): the page appears as it is
-    scanned; press **Save** at the end.
-  - *Keep on the printer* (150 dpi): you can close the page and come back
-    for the scan later.
+- **The web app:** open `http://canon-mg2500.local/` (your `HOSTNAME`) on
+  a phone or a computer. On a phone it opens on a menu; pick what to do.
+  - *Printer*: status, ink levels, recent jobs; upload a file and print it.
+  - *Scanner*: A4, Letter or an ID card at 150, 300 or 600 dpi. The page
+    appears as it is scanned and is saved to *Files*.
+  - *Files*: your scans and uploads (PDFs and pictures), kept in this
+    browser only (nothing is stored on the printer). Print, download,
+    rename, delete. The print dialog has copies, pages, paper, fit / fill /
+    actual size, orientation, colour or black and white, and quality.
+  - *Process*: put pages from Files together, rotate and crop them, make an
+    ID card copy (front and back on one sheet at real size), and save the
+    result as a PDF in Files.
+- **The button on the board** (BOOT): press it to scan the page on the
+  glass (A4, 150 dpi). Every open web app shows the scan and saves it to
+  its Files. Press twice for a test page; hold 2 s to cancel what is
+  running.
+- **Print from a phone or a Mac:** on an iPhone, Share → Print and pick the
+  printer. On a Mac, add it in System Settings → Printers & Scanners.
 - **Scan on a Mac:** open Image Capture (or Preview → File → Import from
   Scanner) and pick the printer.
-- **Status page** (ink levels, recent jobs): `http://canon-mg2500.local/`.
 
 The printer does one thing at a time: a print waits while it scans.
 
 The board's LED: blinking yellow = no printer, green = ready, blinking
-green = printing or scanning, red = the last test page failed, blue =
-"Identify" in the printer settings. The BOOT button prints a test page;
-holding it 2 s cancels what is running.
+green = printing or scanning, red = the last test page or a button scan
+failed, blue = "Identify" in the printer settings.
 
 ## Updating over WiFi (MODE=debug)
 
@@ -75,5 +89,11 @@ this mode.
 
 Set `MODE=dev` and flash: print jobs are processed but not printed, and
 scans show a built-in test page.
+
+On the computer, without the board: `make -C host && cd host &&
+./airprint_host`, then open http://localhost:8631/ (an emulated printer and
+scanner). To work on the web app with live reloading: `cd web && npm run
+dev` (it talks to that server; `DEVICE=http://<board IP> npm run dev` talks
+to the board).
 
 Technical details are in [AGENTS.md](AGENTS.md).

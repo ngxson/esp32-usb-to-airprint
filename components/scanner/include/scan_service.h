@@ -2,15 +2,19 @@
 // line by line while the scanner delivers them, so no page is ever held raw.
 //
 // Two modes, both writing into the shared buffer (shared_buf.h):
-//   stream  GET /scan/stream.jpg?dpi=150|300|600&paper=a4|letter
+//   stream  GET /scan/stream.jpg?dpi=150|300|600&paper=a4|letter|card
+//           (card: a 4 x 2.83 in area in the corner of the glass)
 //           The response is the JPEG, sent while it is scanned. The buffer is
 //           a ring between the scan and the connection; if the client falls
 //           behind, the scan waits (the scanner pauses), and a client that
 //           stops reading for STALL_TIMEOUT cancels it.
-//   last    POST /scan/last?paper=a4|letter
-//           A 150 dpi scan kept whole in the buffer; the browser can leave and
-//           fetch it later from GET /scan/last.jpg (until the buffer is reused).
-// Also: GET /scan (the page), GET /scan/status (JSON), POST /scan/cancel.
+//   last    POST /scan/last?dpi=75|150|300|600&paper=a4|letter|card (150 dpi by default)
+//           A scan kept whole in the buffer (it fails if the JPEG does not
+//           fit); any browser can fetch it from GET /scan/last.jpg, also
+//           while it is scanned (?id=<scan>&from=<offset> for the new part),
+//           until the buffer is reused. The device's button starts one too.
+// Also: GET /scan/status (JSON, also in the /events snapshot), POST /scan/cancel,
+// GET /scan (redirects to the web UI's scanner page).
 //
 // eSCL / AirScan (Mopria eSCL, as macOS Image Capture and sane-airscan use it)
 // under /eSCL: ScannerCapabilities, ScannerStatus, POST ScanJobs (scan
@@ -48,6 +52,11 @@ void scan_service_init(const scan_config_t *cfg);
 bool scan_service_http(airprint_http_t *h, const char *method, const char *path);
 bool scan_service_active(void);
 void scan_service_cancel(void);
+// A kept scan as the device's button starts it: an A4 page at 150 dpi.
+// Returns 0, or an HTTP status and the reason in *why.
+int scan_service_start_button(const char **why);
+// events.h source: the scan state as JSON (also GET /scan/status).
+int scan_service_status_json(void *ctx, char *buf, size_t n);
 
 // HTML for the status page
 #define SCAN_HOME_HTML "<p><a href=\"/scan\">Scan a document</a></p>"

@@ -5,7 +5,10 @@
 #   QEMU_XTENSA=... tools/run_tests.sh  + firmware dry run on emulated ESP32-S3
 #   AIRPRINT=1 tools/run_tests.sh    + AirPrint server on this Mac: IPP conformance
 #                                      (ipptool) and printing URF / PWG documents
-#                                      rendered by macOS's own filters
+#                                      rendered by macOS's own filters, the web
+#                                      UI's live state and the button scan
+#   WEB=1 tools/run_tests.sh         + the web UI in headless Chrome against the
+#                                      host server (print, scan, sync, Process)
 set -euo pipefail
 cd "$(dirname "$0")/.."
 OUT=host/out
@@ -24,6 +27,23 @@ for s in "150 a4" "300 a4" "300 letter" "600 letter"; do
     python3 tools/check_jpeg.py $OUT/scan$1-$2.jpg --ref $OUT/scan$1-$2.ppm --dpi $1 --min-psnr 38
     rm -f $OUT/scan$1-$2.ppm
 done
+
+echo "== web UI unit tests (web/tests)"
+if [ -d web/node_modules ]; then
+    (cd web && node --test tests/*.test.ts 2>&1 | grep -E "^ℹ (pass|fail)|^✖" | tr '\n' ' '; echo)
+    # the browser's URF, decoded by the independent Python decoder
+    python3 - <<'PY'
+import sys, numpy as np
+sys.path.insert(0, 'tools')
+from raster_to_png import pages
+src = np.fromfile('host/out/web-color.rgba', dtype=np.uint8).reshape(500, 333, 4)[:, :, :3]
+(img, w, h, bpp, dpi), = list(pages(open('host/out/web-color.urf', 'rb').read()))
+print('URF from the browser encoder, decoded by raster_to_png.py:',
+      'identical' if (img.reshape(h, w, 3) == src).all() else 'DIFFERENT')
+PY
+else
+    echo "skipped: no web/node_modules (cd web && npm ci)"
+fi
 
 echo "== test page streams (decoded previews in $OUT/)"
 for dpi in 300 600; do
@@ -141,7 +161,61 @@ if [ -n "${AIRPRINT:-}" ]; then
          "then its document: $(curl -s -o /dev/null -w '%{http_code}' http://localhost:$PORT$JOB/NextDocument)"
     echo "document feeder: $(curl -s -o /dev/null -w '%{http_code}' --data "${SETTINGS/Platen/Feeder}" $E/ScanJobs) (409)"
     kill $SERVER; wait $SERVER 2>/dev/null || true
+
+    echo "== web UI: live state, events, the button"
+    (cd host && FAKE_SCANNER_KBPS=4000 exec ./airprint_host $PORT >> out/airprint-scan.log 2>&1) &
+    SERVER=$!
+    sleep 1
+    W=http://localhost:$PORT
+    js=$(curl -s --compressed $W/ | grep -oE '/assets/index-[^"]+\.js' | head -1)
+    etag=$(curl -s -D - -o /dev/null $W/ | tr -d '\r' | awk '/^ETag:/ {print $2}')
+    echo "page $(curl -s -o /dev/null -w '%{http_code}' $W/), app $(curl -s --compressed -o /dev/null -w '%{http_code}' $W$js)," \
+         "again with its ETag $(curl -s -o /dev/null -w '%{http_code}' -H "If-None-Match: $etag" $W/)"
+    curl -s -N --max-time 60 $W/events > $OUT/events.txt &
+    EVENTS=$!
+    sleep 1
+    kill -USR1 $SERVER      # the button: a kept 150 dpi A4 scan
+    sleep 1
+    ID=$(curl -s $W/scan/status | python3 -c "import json,sys; print(json.load(sys.stdin)['id'])")
+    FROM=0; : > $OUT/button.jpg
+    for i in $(seq 1 120); do   # read it while it is scanned, as the page does
+        st=$(curl -s -D $OUT/h.txt -o $OUT/piece.bin "$W/scan/last.jpg?id=$ID&from=$FROM"; tr -d '\r' < $OUT/h.txt | awk '/^X-Scan-State:/ {print $2}')
+        cat $OUT/piece.bin >> $OUT/button.jpg; FROM=$(wc -c < $OUT/button.jpg | tr -d ' ')
+        [ "$st" != scanning ] && break
+        sleep 0.5
+    done
+    cmp -s $OUT/button.jpg $OUT/scan150-a4.jpg && echo "button scan read while scanned ($i reads): identical to the direct scan" \
+        || echo "button scan DIFFERS from the direct scan"
+    sleep 2; kill $EVENTS 2>/dev/null; wait $EVENTS 2>/dev/null || true
+    python3 - $OUT/events.txt <<'PY'
+import json, sys
+ev = [json.loads(l[6:]) for l in open(sys.argv[1]) if l.startswith('data: ')]
+seen = [e['scan']['state'] for e in ev]
+print('events: %d snapshots, scan %s, last %s from the %s' % (len(ev), ' -> '.join(dict.fromkeys(seen)),
+      ev[-1]['scan']['last_id'] == ev[-1]['scan']['id'] and 'kept' or 'NOT kept', ev[-1]['scan']['source']))
+PY
+    kill $SERVER; wait $SERVER 2>/dev/null || true
     grep -h "protocol violations" host/out/airprint-scan.log | sort | uniq -c | sed 's/^ */  scanner closed: /'
+    trap - EXIT
+fi
+
+if [ -n "${WEB:-}" ]; then
+    echo "== web UI in headless Chrome (screenshots in $OUT/ui-*.png)"
+    PORT=8641
+    mkdir -p $OUT/e2e
+    gunzip -c /usr/share/cups/ipptool/document-a4.pdf > $OUT/e2e/document-a4.pdf
+    gunzip -c /usr/share/cups/ipptool/color.jpg > $OUT/e2e/color.jpg
+    pkill -f "airprint_host $PORT" 2>/dev/null || true
+    rm -f host/out/job-*.prn
+    (cd host && FAKE_SCANNER_KBPS=4000 exec ./airprint_host $PORT > out/airprint-web.log 2>&1) &
+    SERVER=$!
+    trap 'kill $SERVER 2>/dev/null' EXIT
+    sleep 1
+    (cd web && BASE=http://localhost:$PORT SERVER_PID=$SERVER node tests/e2e.mjs 2>&1 | grep -E "^- |^e2e|Error|rror:" | head -20)
+    for j in host/out/job-*.prn; do
+        python3 tools/bjl_decode.py $j --png ${j%.prn}.png --scale 4 --quiet | grep -E "^page|DECODE ERROR" | sed "s|^|  $(basename $j): |"
+    done
+    kill $SERVER; wait $SERVER 2>/dev/null || true
     trap - EXIT
 fi
 

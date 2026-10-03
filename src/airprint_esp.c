@@ -10,6 +10,7 @@
 #include "esp_log.h"
 #include "esp_mac.h"
 #include "esp_timer.h"
+#include "events.h"
 #include "fake_scanner.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -19,11 +20,12 @@
 #include "shared_buf.h"
 #include "status_led.h"
 #include "usb_printer.h"
+#include "webui.h"
 
 static const char *TAG = "airprint_esp";
 
 #define IPP_PORT 631
-#define WEB_PORT 80             // status and scan pages for browsers (also on 631)
+#define WEB_PORT 80             // the web UI for browsers (also on 631)
 #define CANCEL_FORCE_MS 8000    // graceful cancel didn't finish: abort the USB transfer
 
 static airprint_config_t s_cfg;
@@ -267,10 +269,15 @@ static void dev_job_close(void *ctx, bool ok)
              (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
 }
 
+static bool web_http(airprint_http_t *h, const char *method, const char *path)
+{
+    return scan_service_http(h, method, path) || events_http(h, method, path) || webui_http(h, method, path);
+}
+
 static bool dev_http(void *ctx, airprint_http_t *h, const char *method, const char *path)
 {
     if (strcmp(path, "/dev/last-job.prn") != 0)
-        return scan_service_http(h, method, path);
+        return web_http(h, method, path);
     size_t len;
     const uint8_t *data = sbuf_read_begin(SBUF_PRINT, &len);
     if (!data)
@@ -344,7 +351,7 @@ static void scan_sleep(void *ctx, int ms)
 
 static bool http_handler(void *ctx, airprint_http_t *h, const char *method, const char *path)
 {
-    return scan_service_http(h, method, path);
+    return web_http(h, method, path);
 }
 
 // Most of the PSRAM, for scans (and the dev mode print capture)
@@ -488,7 +495,10 @@ esp_err_t airprint_esp_start(const char *hostname, void (*on_job_state)(bool pri
         }
     }
     scan_service_init(&s_scan_cfg);
-    if (airprint_start(&s_cfg) != 0)
+    // live state for the web UI (GET /events)
+    events_add_source("printer", airprint_status_json, NULL);
+    events_add_source("scan", scan_service_status_json, NULL);
+    if (airprint_start(&s_cfg) != 0 || events_start() != 0)
         return ESP_FAIL;
     return start_mdns(hostname);
 }

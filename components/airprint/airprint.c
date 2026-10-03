@@ -23,6 +23,7 @@
 
 #include "bjl_render.h"
 #include "canon_bjl.h"
+#include "events.h"
 #include "icon_png.h"
 #include "ipp.h"
 #include "raster.h"
@@ -98,6 +99,7 @@ struct airprint_http {
     char method[8];
     char path[128];
     char host[96];
+    char if_none_match[48];
     bool keep_alive;
     bool http10;                // HTTP/1.0 client: no chunked responses
     bool chunked_out;           // streaming response uses chunked encoding
@@ -106,6 +108,7 @@ struct airprint_http {
     int64_t remaining;          // Content-Length mode: bytes left; chunked: bytes left in chunk
     bool body_eof;
     bool in_chunks;             // a chunk was read: CRLF precedes the next size line
+    bool detached;              // the socket was handed over (airprint_http_detach)
 };
 typedef struct airprint_http conn_t;
 
@@ -300,6 +303,11 @@ const char *airprint_http_host(airprint_http_t *c)
     return c->host;
 }
 
+const char *airprint_http_if_none_match(airprint_http_t *c)
+{
+    return c->if_none_match;
+}
+
 int airprint_http_stream_begin(airprint_http_t *c, const char *type, const char *extra_headers)
 {
     // a client that stops reading must not block the sender forever
@@ -337,6 +345,13 @@ int airprint_http_stream_write(airprint_http_t *c, const void *data, size_t len)
         return -1;
     }
     return 0;
+}
+
+int airprint_http_detach(airprint_http_t *c)
+{
+    c->detached = true;
+    c->keep_alive = false;
+    return c->fd;
 }
 
 int airprint_http_stream_end(airprint_http_t *c)
@@ -1315,6 +1330,86 @@ static void handle_ipp(conn_t *c)
 }
 
 // ===========================================================================
+// live state for the web UI (events.h)
+
+static const char *job_state_name(int state)
+{
+    switch (state) {
+    case JOB_PENDING: return "pending";
+    case JOB_HELD: return "held";
+    case JOB_PROCESSING: return "processing";
+    case JOB_CANCELED: return "canceled";
+    case JOB_ABORTED: return "aborted";
+    case JOB_COMPLETED: return "completed";
+    default: return "unknown";
+    }
+}
+
+#define STATUS_REFRESH_S 2      // the printer status costs a USB control transfer
+
+int airprint_status_json(void *ctx, char *buf, size_t n)
+{
+    static pthread_mutex_t cache_lock = PTHREAD_MUTEX_INITIALIZER;
+    static airprint_status_t cached;
+    static time_t cached_at;
+    airprint_status_t st;
+    time_t now = time(NULL);
+    pthread_mutex_lock(&cache_lock);
+    if (!cached_at || now - cached_at >= STATUS_REFRESH_S || now < cached_at) {
+        get_status(&cached);
+        cached_at = now;
+    }
+    st = cached;
+    pthread_mutex_unlock(&cache_lock);
+    size_t p = 0;
+#define PUT(...) (p += (size_t)snprintf(buf + p, p < n ? n - p : 0, __VA_ARGS__))
+#define STR(s) (p = events_json_str(buf, p, n, (s)))
+    PUT("{\"name\":");
+    STR(s_cfg->name);
+    PUT(",\"model\":");
+    STR(s_cfg->make_model);
+    pthread_mutex_lock(&s_lock);
+    expire_pending();
+    int state = printer_state(&st);
+    PUT(",\"connected\":%s,\"state\":\"%s\",\"message\":", st.connected ? "true" : "false",
+        state == 5 ? "stopped" : state == 4 ? "processing" : "idle");
+    STR(st.message[0] ? st.message : st.connected ? "Ready" : "Printer not connected");
+    PUT(",\"reasons\":[");
+    for (int i = 0; i < st.nreasons; i++) {
+        PUT(i ? "," : "");
+        STR(st.reasons[i]);
+    }
+    PUT("],\"supplies\":[");
+    for (int i = 0; i < st.nsupplies; i++) {
+        PUT("%s{\"name\":", i ? "," : "");
+        STR(st.supply[i].name);
+        PUT(",\"color\":");
+        STR(st.supply[i].color);
+        PUT(",\"level\":%d}", st.supply[i].level);
+    }
+    PUT("],\"active\":%d,\"jobs\":[", s_active ? s_active->id : 0);
+    int listed = 0;
+    for (int id = s_next_id - 1; id > 0 && id >= s_next_id - MAX_JOBS && listed < 6 && p < n - 300; id--) {
+        const job_t *j = job_find(id);
+        if (!j)
+            continue;
+        PUT("%s{\"id\":%d,\"name\":", listed++ ? "," : "", j->id);
+        STR(j->name[0] ? j->name : "Untitled");
+        PUT(",\"user\":");
+        STR(j->user);
+        // a time, not an age: the snapshot only changes when something happens
+        PUT(",\"state\":\"%s\",\"reason\":\"%s\",\"pages\":%d,\"bytes\":%lld,\"time\":%lld}",
+            job_state_name(j->state), job_reason(j), j->impressions, (long long)j->bytes,
+            (long long)(j->completed ? j->completed : j->created));
+    }
+    pthread_mutex_unlock(&s_lock);
+    PUT("]}");
+#undef PUT
+#undef STR
+    return p < n ? (int)p : -1;
+}
+
+// ===========================================================================
 // web page
 
 static void handle_get(conn_t *c)
@@ -1387,6 +1482,7 @@ static void *conn_thread(void *arg)
         c->body_eof = false;
         c->in_chunks = false;
         c->host[0] = 0;
+        c->if_none_match[0] = 0;
         bool expect_continue = false, has_length = false;
         int hl;
         while ((hl = read_line(c, line, sizeof(line))) > 0) {
@@ -1410,6 +1506,8 @@ static void *conn_thread(void *arg)
                     c->keep_alive = true;
             } else if (!strcasecmp(line, "Host")) {
                 snprintf(c->host, sizeof(c->host), "%s", v);
+            } else if (!strcasecmp(line, "If-None-Match")) {
+                snprintf(c->if_none_match, sizeof(c->if_none_match), "%s", v);
             }
         }
         if (hl < 0)
@@ -1441,7 +1539,8 @@ static void *conn_thread(void *arg)
         if (!c->keep_alive)
             break;
     }
-    close(c->fd);
+    if (!c->detached)
+        close(c->fd);
     free(c);
     pthread_mutex_lock(&s_lock);
     s_connections--;

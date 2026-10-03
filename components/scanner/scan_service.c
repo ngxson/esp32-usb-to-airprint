@@ -1,6 +1,8 @@
 // Scan jobs: a thread runs the scanner and the JPEG encoder; the encoder
 // writes into the shared buffer, as a ring drained by the HTTP connection
-// (stream mode) or as a whole file kept for later (last mode).
+// (stream mode) or as a whole file kept for later (last mode). A kept scan
+// can be read while it is scanned (it only grows), so every browser can show
+// it, whoever started it.
 #include "scan_service.h"
 
 #include <pthread.h>
@@ -8,13 +10,15 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include <unistd.h>
 
+#include "events.h"
 #include "jpeg_enc.h"
-#include "scan_page.h"
 #include "shared_buf.h"
 
 #ifdef ESP_PLATFORM
 #include "esp_log.h"
+#include "esp_random.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #define LOGI(...) ESP_LOGI("scan", __VA_ARGS__)
@@ -27,7 +31,9 @@
 #endif
 
 #define QUALITY 85
-#define LAST_DPI 150
+#define LAST_DPI 150            // kept scans without a dpi
+#define BUTTON_DPI 150          // the device's button: an A4 page at 150 dpi
+#define RECENT_S 600            // a scan this recent is "recent" in the status
 #define STALL_TIMEOUT_S 60      // stream client not reading: cancel the scan
 #define SEND_PIECE 16384
 
@@ -36,11 +42,12 @@ typedef enum { ST_IDLE, ST_SCANNING, ST_DONE, ST_FAILED, ST_CANCELED } scan_stat
 
 static const char *const STATE_NAMES[] = {"idle", "scanning", "done", "failed", "canceled"};
 
-// paper sizes in 1/600 inch (as canon_bjl)
+// paper sizes in 1/600 inch (as canon_bjl); "card": the corner of the glass
+// where an ID card goes (85.6 x 54 mm, with room to spare), a quick scan
 static const struct {
     const char *name;
     int w, h;
-} PAPERS[] = {{"a4", 4961, 7016}, {"letter", 5100, 6600}};
+} PAPERS[] = {{"a4", 4961, 7016}, {"letter", 5100, 6600}, {"card", 2400, 1700}};
 
 // a scan area: dpi, and offset and size in pixels at that dpi
 typedef struct {
@@ -74,6 +81,14 @@ static struct {
     bool overflow;
     int64_t t_start, t_end, enc_us;
     int last_paper;             // paper of the kept scan
+    int last_dpi;
+    char id[24];                // this scan: "<boot>-<n>", unique across boots
+    char last_id[24];           // the kept scan
+    const char *source;         // who started it: "web", "stream", "button", "escl"
+    int readers;                // connections reading the kept scan while it is written
+    bool released;              // the buffer was given back (kept or not)
+    unsigned seq;
+    uint32_t boot;
 } S;
 
 static int64_t now_us(void)
@@ -190,14 +205,19 @@ static void *scan_thread(void *arg)
     snprintf(S.error, sizeof(S.error), "%s",
              ok ? "" : S.overflow ? "the image does not fit in memory" : pixma_strerror(err));
     pthread_cond_broadcast(&s_cond);
-    while (S.consumer)              // the client still reads from the buffer
+    while (S.consumer || S.readers)     // clients still read from the buffer
         pthread_cond_wait(&s_cond, &s_lock);
     size_t keep = S.mode == MODE_LAST && ok ? (size_t)S.wpos : 0;
-    if (keep)
+    if (keep) {
         S.last_paper = S.paper;
+        S.last_dpi = S.dpi;
+        memcpy(S.last_id, S.id, sizeof(S.last_id));
+    }
     uint64_t bytes = S.wpos;
-    pthread_mutex_unlock(&s_lock);
     sbuf_release(SBUF_SCAN, keep);
+    S.released = true;          // from now on readers go through sbuf_read_begin
+    pthread_mutex_unlock(&s_lock);
+    events_poke();
 
     double secs = (S.t_end - S.t_start) / 1e6;
     LOGI("scan %s: %d lines, %llu bytes of JPEG, %.1f s (%.1f s encoding)%s%s", STATE_NAMES[S.state], lines,
@@ -210,7 +230,7 @@ static void *scan_thread(void *arg)
 }
 
 // Starts a scan. Returns 0, or fills `why` and returns an HTTP status.
-static int start_scan(scan_mode_t mode, const scan_area_t *a, const char **why)
+static int start_scan(scan_mode_t mode, const scan_area_t *a, const char *source, const char **why)
 {
     pthread_mutex_lock(&s_lock);
     int code = 503;
@@ -233,8 +253,11 @@ static int start_scan(scan_mode_t mode, const scan_area_t *a, const char **why)
         pthread_mutex_unlock(&s_lock);
         return code;
     }
+    S.last_id[0] = 0;           // taking the buffer dropped the kept scan
     S.state = ST_SCANNING;
     S.mode = mode;
+    S.source = source;
+    snprintf(S.id, sizeof(S.id), "%08lx-%u", (unsigned long)S.boot, ++S.seq);
     S.dpi = a->dpi;
     S.paper = a->paper;
     S.x = a->x;
@@ -247,6 +270,7 @@ static int start_scan(scan_mode_t mode, const scan_area_t *a, const char **why)
     S.buf = buf;
     S.size = size;
     S.wpos = S.rpos = 0;
+    S.released = false;
     S.consumer = mode == MODE_STREAM;
     S.discard = false;
     S.overflow = false;
@@ -273,6 +297,7 @@ static int start_scan(scan_mode_t mode, const scan_area_t *a, const char **why)
         return 500;
     }
     pthread_mutex_unlock(&s_lock);
+    events_poke();
     return 0;
 }
 
@@ -374,12 +399,12 @@ static void handle_stream(airprint_http_t *h, const char *query)
         dpi = 300;
     int paper = parse_paper(query);
     if ((dpi != 150 && dpi != 300 && dpi != 600) || paper < 0) {
-        send_text(h, 400, "dpi must be 150, 300 or 600, paper a4 or letter");
+        send_text(h, 400, "dpi must be 150, 300 or 600, paper a4, letter or card");
         return;
     }
     const char *why;
     scan_area_t a = paper_area(paper, dpi);
-    int code = start_scan(MODE_STREAM, &a, &why);
+    int code = start_scan(MODE_STREAM, &a, "stream", &why);
     if (code) {
         send_text(h, code, why);
         return;
@@ -387,50 +412,120 @@ static void handle_stream(airprint_http_t *h, const char *query)
     send_stream(h, "image/jpeg");
 }
 
+static int start_kept(int paper, int dpi, const char *source, const char **why)
+{
+    scan_area_t a = paper_area(paper, dpi);
+    return start_scan(MODE_LAST, &a, source, why);
+}
+
 static void handle_last(airprint_http_t *h, const char *query)
 {
+    char v[16];
+    int dpi = atoi(query_get(query, "dpi", v, sizeof(v)));
+    if (!v[0])
+        dpi = LAST_DPI;
     int paper = parse_paper(query);
-    if (paper < 0) {
-        send_text(h, 400, "paper must be a4 or letter");
+    if ((dpi != 75 && dpi != 150 && dpi != 300 && dpi != 600) || paper < 0) {
+        send_text(h, 400, "dpi must be 75, 150, 300 or 600, paper a4, letter or card");
         return;
     }
     const char *why;
-    scan_area_t a = paper_area(paper, LAST_DPI);
-    int code = start_scan(MODE_LAST, &a, &why);
-    if (code)
+    int code = start_kept(paper, dpi, "web", &why);
+    if (code) {
         send_text(h, code, why);
-    else
-        airprint_http_send(h, "202 Accepted", "application/json", "{\"ok\":true}", 11);
+        return;
+    }
+    pthread_mutex_lock(&s_lock);
+    char js[64];
+    int n = snprintf(js, sizeof(js), "{\"ok\":true,\"id\":\"%s\"}", S.id);
+    pthread_mutex_unlock(&s_lock);
+    airprint_http_send(h, "202 Accepted", "application/json", js, (size_t)n);
 }
 
-static void handle_last_jpg(airprint_http_t *h)
+// GET /scan/last.jpg[?id=<scan id>][&from=<offset>]: the kept scan from
+// `from` on. While it is scanned: what was encoded so far (possibly nothing),
+// X-Scan-State tells whether more follows. id: 404 unless that scan is the
+// one kept (or being kept).
+static void handle_last_jpg(airprint_http_t *h, const char *query)
 {
+    char id[24], v[16];
+    query_get(query, "id", id, sizeof(id));
+    long long from = atoll(query_get(query, "from", v, sizeof(v)));
+    if (from < 0)
+        from = 0;
+    char hdr[96];
+    pthread_mutex_lock(&s_lock);
+    if (S.running && !S.released && S.mode == MODE_LAST && (!id[0] || !strcmp(id, S.id))) {
+        // the scan thread keeps the buffer until the last reader is done
+        S.readers++;
+        uint64_t end = S.wpos;
+        bool more = S.producing;
+        snprintf(hdr, sizeof(hdr), "Cache-Control: no-store\r\nX-Scan-Id: %s\r\nX-Scan-State: %s\r\n", S.id,
+                 more ? "scanning" : STATE_NAMES[S.state]);
+        const uint8_t *p = S.buf;
+        pthread_mutex_unlock(&s_lock);
+        size_t start = (uint64_t)from < end ? (size_t)from : (size_t)end;
+        airprint_http_send_ex(h, "200 OK", "image/jpeg", hdr, p + start, (size_t)(end - start));
+        pthread_mutex_lock(&s_lock);
+        S.readers--;
+        pthread_cond_broadcast(&s_cond);
+        pthread_mutex_unlock(&s_lock);
+        return;
+    }
+    bool match = !id[0] || !strcmp(id, S.last_id);
+    snprintf(hdr, sizeof(hdr), "Cache-Control: no-store\r\nX-Scan-Id: %s\r\nX-Scan-State: done\r\n", S.last_id);
+    pthread_mutex_unlock(&s_lock);
     size_t len;
-    const uint8_t *p = sbuf_read_begin(SBUF_SCAN, &len);
+    const uint8_t *p = match ? sbuf_read_begin(SBUF_SCAN, &len) : NULL;
     if (!p) {
         send_text(h, 404, "No scan is kept on the printer");
         return;
     }
-    airprint_http_send(h, "200 OK", "image/jpeg", p, len);
+    size_t start = (size_t)from < len ? (size_t)from : len;
+    airprint_http_send_ex(h, "200 OK", "image/jpeg", hdr, p + start, len - start);
     sbuf_read_end();
+}
+
+int scan_service_status_json(void *ctx, char *js, size_t size)
+{
+    bool scanner = !s_cfg || !s_cfg->available || s_cfg->available(s_cfg->ctx);
+    size_t last = sbuf_content(SBUF_SCAN);
+    pthread_mutex_lock(&s_lock);
+    int64_t now = now_us(), end = S.t_end ? S.t_end : now;
+    int n = snprintf(js, size,
+                     "{\"scanner\":%s,\"state\":\"%s\",\"mode\":\"%s\",\"id\":\"%s\",\"source\":\"%s\",\"dpi\":%d,"
+                     "\"paper\":\"%s\",\"width\":%d,\"height\":%d,\"lines\":%d,\"bytes\":%llu,\"elapsed\":%.1f,"
+                     "\"recent\":%s,\"error\":\"%s\",\"last\":%u,\"last_id\":\"%s\",\"last_paper\":\"%s\","
+                     "\"last_dpi\":%d,\"button\":{\"dpi\":%d,\"paper\":\"%s\"}}",
+                     scanner ? "true" : "false", STATE_NAMES[S.state], S.mode == MODE_LAST ? "last" : "stream", S.id,
+                     S.source ? S.source : "", S.dpi, paper_name(S.paper), S.width, S.height, S.lines,
+                     (unsigned long long)S.wpos, S.t_start ? (end - S.t_start) / 1e6 : 0.0,
+                     S.t_end && !S.producing && now - S.t_end < RECENT_S * 1000000LL ? "true" : "false", S.error,
+                     (unsigned)(S.last_id[0] ? last : 0), S.last_id, paper_name(S.last_paper), S.last_dpi,
+                     BUTTON_DPI, paper_name(0));
+    pthread_mutex_unlock(&s_lock);
+    return n < (int)size ? n : -1;
 }
 
 static void handle_status(airprint_http_t *h)
 {
-    bool scanner = !s_cfg->available || s_cfg->available(s_cfg->ctx);
-    size_t last = sbuf_content(SBUF_SCAN);
-    char js[512];
-    pthread_mutex_lock(&s_lock);
-    int64_t end = S.t_end ? S.t_end : now_us();
-    int n = snprintf(js, sizeof(js),
-                     "{\"scanner\":%s,\"state\":\"%s\",\"mode\":\"%s\",\"dpi\":%d,\"paper\":\"%s\",\"width\":%d,"
-                     "\"height\":%d,\"lines\":%d,\"bytes\":%llu,\"elapsed\":%.1f,\"error\":\"%s\",\"last\":%u,"
-                     "\"last_paper\":\"%s\"}",
-                     scanner ? "true" : "false", STATE_NAMES[S.state], S.mode == MODE_LAST ? "last" : "stream", S.dpi,
-                     paper_name(S.paper), S.width, S.height, S.lines, (unsigned long long)S.wpos,
-                     S.t_start ? (end - S.t_start) / 1e6 : 0.0, S.error, (unsigned)last, paper_name(S.last_paper));
-    pthread_mutex_unlock(&s_lock);
-    airprint_http_send(h, "200 OK", "application/json", js, (size_t)n);
+    char js[640];
+    int n = scan_service_status_json(NULL, js, sizeof(js));
+    airprint_http_send_ex(h, "200 OK", "application/json", "Cache-Control: no-store\r\n", js, n > 0 ? (size_t)n : 0);
+}
+
+int scan_service_start_button(const char **why)
+{
+    if (!s_cfg) {
+        *why = "scanning is not set up (no WiFi?)";
+        return 503;
+    }
+    int dpi = BUTTON_DPI, paper = 0;    // A4
+    *why = "";
+    int code = start_kept(paper, dpi, "button", why);
+    if (!code)
+        LOGI("button: kept scan, %s, %d dpi", paper_name(paper), dpi);
+    return code;
 }
 
 // ---------------------------------------------------------------------------
@@ -697,7 +792,7 @@ static void escl_next_document(airprint_http_t *h, const char *id)
         return;
     }
     const char *why;
-    int code = start_scan(MODE_STREAM, &a, &why);
+    int code = start_scan(MODE_STREAM, &a, "escl", &why);
     if (code) {
         send_text(h, 503, why);
         return;
@@ -802,8 +897,9 @@ bool scan_service_http(airprint_http_t *h, const char *method, const char *path)
         return escl_http(h, method, route);
 
     if (!strcmp(route, "/scan") || !strcmp(route, "/scan/")) {
+        // the scanner page of the web UI
         if (get)
-            airprint_http_send(h, "200 OK", "text/html; charset=utf-8", SCAN_PAGE, sizeof(SCAN_PAGE) - 1);
+            airprint_http_send_ex(h, "302 Found", "text/plain", "Location: /#/scanner\r\n", "", 0);
         else
             send_text(h, 405, "use GET");
     } else if (!strcmp(route, "/scan/status")) {
@@ -813,7 +909,7 @@ bool scan_service_http(airprint_http_t *h, const char *method, const char *path)
     } else if (!strcmp(route, "/scan/last")) {
         post ? handle_last(h, query) : send_text(h, 405, "use POST");
     } else if (!strcmp(route, "/scan/last.jpg")) {
-        get ? handle_last_jpg(h) : send_text(h, 405, "use GET");
+        get ? handle_last_jpg(h, query) : send_text(h, 405, "use GET");
     } else if (!strcmp(route, "/scan/cancel")) {
         if (post) {
             scan_service_cancel();
@@ -830,6 +926,11 @@ bool scan_service_http(airprint_http_t *h, const char *method, const char *path)
 void scan_service_init(const scan_config_t *cfg)
 {
     s_cfg = cfg;
+#ifdef ESP_PLATFORM
+    S.boot = esp_random();
+#else
+    S.boot = (uint32_t)time(NULL) ^ (uint32_t)now_us() ^ ((uint32_t)getpid() << 16);
+#endif
 }
 
 bool scan_service_active(void)

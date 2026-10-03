@@ -13,6 +13,9 @@ sdkconfig.old
 # generated from .env.example + .env by tools/gen_local_config.py
 src/local_config.h
 
+# web UI: generated from web/dist by tools/gen_web.py
+components/webui/web_assets.c
+
 # host test harness output
 host/bjl_host
 host/bjl_host.dSYM/

@@ -18,6 +18,7 @@
 #include "esp_log.h"
 #include "esp_netif.h"
 #include "esp_system.h"
+#include "events.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 #include "freertos/task.h"
@@ -25,6 +26,7 @@
 #include "print_job.h"
 #include "scan_service.h"
 #include "shared_buf.h"
+#include "webui.h"
 
 // No PSRAM in QEMU: a small buffer in internal RAM (a bigger one starves the
 // network during the 600 dpi print test). Streams wrap it many times; a kept
@@ -112,7 +114,7 @@ static void scan_close(void *ctx)
 
 static bool http_handler(void *ctx, airprint_http_t *h, const char *method, const char *path)
 {
-    return scan_service_http(h, method, path);
+    return scan_service_http(h, method, path) || events_http(h, method, path) || webui_http(h, method, path);
 }
 
 static bool net_up(void)
@@ -166,7 +168,10 @@ void app_main(void)
         .http_handler = http_handler,
         .home_html = SCAN_HOME_HTML,
     };
+    events_add_source("printer", airprint_status_json, NULL);
+    events_add_source("scan", scan_service_status_json, NULL);
     airprint_start(&cfg);
+    events_start();
     debug_server_start(NULL);
     vTaskDelay(pdMS_TO_TICKS(500));
     ESP_LOGI(TAG, "QEMU_SELFTEST ipp ready");

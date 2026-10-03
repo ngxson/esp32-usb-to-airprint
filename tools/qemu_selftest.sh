@@ -79,12 +79,24 @@ if grep -q "QEMU_SELFTEST ipp ready" "$OUT/serial.log"; then
     kill $HOSTSRV 2>/dev/null || true
     grep "QEMU_JOB" "$OUT/serial.log" | tail -2 | sed -E 's/.*(bytes=.*)/  esp32s3 job: \1/'
 
-    # --- web pages on port 80
-    if curl -s -m 10 http://localhost:18000/ | grep -q 'href="/scan"' &&
-       curl -s -m 10 http://localhost:18000/scan | grep -q '<title>Scan</title>'; then
-        echo "MATCH web pages on port 80: status and scan"
+    # --- the web UI on port 80, its live state and event stream
+    W=http://localhost:18000
+    js=$(curl -s -m 10 --compressed $W/ | grep -oE '/assets/index-[^"]+\.js' | head -1)
+    etag=$(curl -s -m 10 -D - -o /dev/null $W/ | tr -d '\r' | awk '/^ETag:/ {print $2}')
+    if [ -n "$js" ] && [ "$(curl -s -m 20 --compressed -o /dev/null -w '%{http_code}' $W$js)" = 200 ] &&
+       [ "$(curl -s -m 10 -o /dev/null -w '%{http_code}' -H "If-None-Match: $etag" $W/)" = 304 ] &&
+       [ "$(curl -s -m 10 -o /dev/null -w '%{http_code}' $W/scan)" = 302 ]; then
+        echo "MATCH web UI on port 80: page, assets (gzip), 304 on its ETag, /scan redirect"
     else
-        echo "MISMATCH web pages on port 80"; status=1
+        echo "MISMATCH web UI on port 80 (asset '$js', ETag '$etag')"; status=1
+    fi
+    # (curl ends the endless event stream with a timeout error: keep its output only)
+    events=$(curl -s -N -m 4 $W/events 2>/dev/null || true)
+    if curl -s -m 10 $W/api/state | python3 -c "import json,sys; s=json.load(sys.stdin); assert s['printer']['connected'] and 'scanner' in s['scan']" &&
+       grep -q '^event: state' <<<"$events"; then
+        echo "MATCH live state: /api/state and the /events stream"
+    else
+        echo "MISMATCH live state"; status=1
     fi
 
     # --- scanning

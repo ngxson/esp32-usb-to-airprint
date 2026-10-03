@@ -3,10 +3,12 @@
 // LED: blinking yellow = ready, no printer / solid green = printer attached /
 //      blinking green = printing (test page or AirPrint) or scanning / fast red = last
 //      job failed / blue flashes = Identify-Printer.
-// BOOT button: short press = print an A4 colour test page (dry run without a
-//      printer), hold 2 s while printing or scanning = cancel.
-// AirPrint: joins the WiFi from .env and serves IPP on port 631; the status
-//      and scan pages are at http://<host>/ and http://<host>/scan (port 80).
+// BOOT button: press = scan an A4 page at 150 dpi (kept on the device: every open web page
+//      shows it and saves it to its Files), double press = print an A4 colour
+//      test page (dry run without a printer), hold 2 s while printing or
+//      scanning = cancel.
+// AirPrint: joins the WiFi from .env and serves IPP on port 631; the web UI
+//      is at http://<host>/ (port 80, and 631).
 // MODE=debug: also the remote log, crash dumps and firmware updates over
 //      WiFi (debug.h, tools/remote.py).
 #include <stdbool.h>
@@ -30,6 +32,7 @@
 static const char *TAG = "main";
 
 #define LONG_PRESS_MS 2000
+#define DOUBLE_PRESS_MS 400     // a second press within this is a double press
 #define ERROR_SHOW_MS 3000
 
 static volatile bool s_busy;            // test page task running
@@ -82,7 +85,26 @@ static void print_task(void *arg)
     vTaskDelete(NULL);
 }
 
-static void on_short_press(void)
+static void on_press(void)
+{
+    if (s_busy || s_airprint_busy) {
+        ESP_LOGI(TAG, "busy; hold BOOT for 2 s to cancel");
+        return;
+    }
+    const char *why;
+    if (scan_service_start_button(&why) == 0) {
+        ESP_LOGI(TAG, "button: scanning; the web pages receive the scan");
+        return;
+    }
+    ESP_LOGW(TAG, "button: cannot scan: %s", why);
+    s_showing_error = true;
+    status_led_set(LED_ERROR);
+    vTaskDelay(pdMS_TO_TICKS(ERROR_SHOW_MS / 2));
+    s_showing_error = false;
+    show_idle_state();
+}
+
+static void on_double_press(void)
 {
     if (s_busy || s_airprint_busy) {
         ESP_LOGI(TAG, "busy; hold BOOT for 2 s to cancel");
@@ -111,8 +133,9 @@ static void button_task(void *arg)
 
     bool stable = true;         // true = released (active low)
     int same = 0;
-    TickType_t pressed_at = 0;
+    TickType_t pressed_at = 0, released_at = 0;
     bool long_fired = false;
+    bool pending = false;       // a press waiting to see whether a second one follows
     while (1) {
         vTaskDelay(pdMS_TO_TICKS(10));
         bool level = gpio_get_level(pin);
@@ -125,8 +148,18 @@ static void button_task(void *arg)
                 pressed_at = xTaskGetTickCount();
                 long_fired = false;
             } else if (!long_fired) {
-                on_short_press();
+                if (pending) {
+                    pending = false;
+                    on_double_press();
+                } else {
+                    pending = true;
+                    released_at = xTaskGetTickCount();
+                }
             }
+        }
+        if (pending && stable && xTaskGetTickCount() - released_at >= pdMS_TO_TICKS(DOUBLE_PRESS_MS)) {
+            pending = false;
+            on_press();
         }
         if (!stable && !long_fired && xTaskGetTickCount() - pressed_at >= pdMS_TO_TICKS(LONG_PRESS_MS)) {
             long_fired = true;
@@ -179,7 +212,7 @@ void app_main(void)
     status_led_set(LED_WAITING);
     ESP_ERROR_CHECK(usb_printer_start(on_printer));
     xTaskCreate(button_task, "button", 3072, NULL, 5, NULL);
-    ESP_LOGI(TAG, "ready: press BOOT to print a test page");
+    ESP_LOGI(TAG, "ready: press BOOT to scan, twice for a test page");
 
     xTaskCreate(ota_confirm_task, "ota_confirm", 3072, NULL, 2, NULL);
     // AirPrint; the printer keeps working locally if WiFi isn't configured

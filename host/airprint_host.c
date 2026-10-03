@@ -1,6 +1,7 @@
 // Runs the AirPrint server on the development machine for testing with
 // ipptool / CUPS. Each job's printer stream is written to out/job-<n>.prn.
-// Scanning (http://localhost:<port>/scan) uses the emulated scanner.
+// The web UI is at http://localhost:<port>/; scanning uses the emulated
+// scanner. SIGUSR1 presses the device's button (a kept scan).
 //
 //   ./airprint_host [port]          (default 8631)
 //   FAKE_SCANNER_KBPS=800           emulated USB rate (0: no delays)
@@ -12,9 +13,11 @@
 #include <unistd.h>
 
 #include "airprint.h"
+#include "events.h"
 #include "fake_scanner.h"
 #include "scan_service.h"
 #include "shared_buf.h"
+#include "webui.h"
 
 static FILE *s_out;
 static int s_job;
@@ -90,7 +93,14 @@ static void scan_close(void *ctx)
 static bool http_handler(void *ctx, airprint_http_t *h, const char *method, const char *path)
 {
     fprintf(stderr, "host: %s %s (Host: %s)\n", method, path, airprint_http_host(h));
-    return scan_service_http(h, method, path);
+    return scan_service_http(h, method, path) || events_http(h, method, path) || webui_http(h, method, path);
+}
+
+static volatile sig_atomic_t s_button;
+
+static void on_usr1(int sig)
+{
+    s_button = 1;
 }
 
 int main(int argc, char **argv)
@@ -125,8 +135,18 @@ int main(int argc, char **argv)
     scfg.io = fake_scanner_io(&s_scanner);
     scan_service_init(&scfg);
     fprintf(stderr, "host: scanner emulated at %u KB/s, %u KB buffer\n", kbps, (unsigned)buf_kb);
-    if (airprint_start(&cfg) != 0)
+    events_add_source("printer", airprint_status_json, NULL);
+    events_add_source("scan", scan_service_status_json, NULL);
+    if (airprint_start(&cfg) != 0 || events_start() != 0)
         return 1;
-    for (;;)
+    signal(SIGUSR1, on_usr1);
+    for (;;) {
         pause();
+        if (s_button) {
+            s_button = 0;
+            const char *why;
+            if (scan_service_start_button(&why))
+                fprintf(stderr, "host: button: %s\n", why);
+        }
+    }
 }

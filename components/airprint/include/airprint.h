@@ -73,11 +73,19 @@ void airprint_http_send_ex(airprint_http_t *h, const char *status, const char *t
 int airprint_http_read_body(airprint_http_t *h, void *buf, size_t max);
 // The request's Host header ("" if none), e.g. "canon-mg2500.local:80".
 const char *airprint_http_host(airprint_http_t *h);
+// The request's If-None-Match header ("" if none).
+const char *airprint_http_if_none_match(airprint_http_t *h);
 // A streamed 200 response of unknown length (chunked); extra_headers are
 // full "Name: value\r\n" lines or NULL. Calls return < 0 once the client is gone.
 int airprint_http_stream_begin(airprint_http_t *h, const char *type, const char *extra_headers);
 int airprint_http_stream_write(airprint_http_t *h, const void *data, size_t len);
 int airprint_http_stream_end(airprint_http_t *h);
+// Takes the connection's socket over (e.g. a long-lived event stream): the
+// server neither reads from nor closes it any more; the caller closes it.
+int airprint_http_detach(airprint_http_t *h);
+
+// events.h source: the printer, its status and the recent jobs as JSON.
+int airprint_status_json(void *ctx, char *buf, size_t n);
 
 #ifdef __cplusplus
 }

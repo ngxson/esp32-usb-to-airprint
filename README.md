@@ -1,11 +1,12 @@
 # ESP32-S3 AirPrint server for the Canon PIXMA MG2500
 
-Turns a USB-only Canon PIXMA MG2500-series printer into a wireless AirPrint
-printer. An ESP32-S3 board plugs into the printer's USB port and joins your
-WiFi. iPhone, iPad and Mac then find the printer and print to it natively, no
-drivers or apps needed. Android (Mopria) and Linux (CUPS, IPP Everywhere)
-work too. The scanner works from any browser, and on a Mac from Image
-Capture and Preview (AirScan / eSCL).
+Turns a USB-only Canon PIXMA MG2500-series printer into a wireless printer
+and scanner. An ESP32-S3 board plugs into the printer's USB port and joins
+your WiFi:
+
+- **Print** from iPhone, iPad and Mac (AirPrint), Android (Mopria) and Linux,
+  with no drivers or apps.
+- **Scan** from any browser, or from Image Capture and Preview on a Mac.
 
 ## What you need
 
@@ -19,93 +20,60 @@ Capture and Preview (AirScan / eSCL).
 ## Setup
 
 1. **Hardware.** Bridge the **USB-OTG** pads on the back of the board with a
-   solder blob, so the **USB** port supplies 5 V to the printer. Connect the
-   printer to the board's **USB** port.
-2. **Settings.** Build once (`pio run`): this creates `.env` from
-   `.env.example`. Edit `.env`:
+   solder blob, so the **USB** port powers the printer's USB connection.
+   Connect the printer to the board's **USB** port.
+2. **Settings.** Build once (`pio run`): this creates `.env`. Edit it:
    ```
    WIFI_SSID=your-network
    WIFI_PASSWORD=your-password
    PRINTER_NAME=Canon MG2500 (ESP32)
    HOSTNAME=canon-mg2500
-   MODE=normal
+   MODE=debug
    ```
-   `.env` is git-ignored, so your WiFi password stays local.
-3. **Flash.** Connect the board's **COM** port to your computer, then run:
-   ```
-   pio run -t upload && pio device monitor
-   ```
-   If your board shows up on another serial port, change `upload_port` and
-   `monitor_port` in `platformio.ini`.
-4. **Print.** On an iPhone: Share → Print → pick the printer name you set.
-   On a Mac it appears in System Settings → Printers & Scanners → Add.
-
-The status page, with ink levels and recent jobs, is at
-`http://canon-mg2500.local/` (your `HOSTNAME`). Scanning is at
-`http://canon-mg2500.local/scan`.
+   `MODE=debug` lets you update the board over WiFi later (see below);
+   `MODE=normal` does without. `.env` is git-ignored, so your WiFi password
+   stays local.
+3. **Flash.** Connect the board's **COM** port to your computer and run
+   `pio run -t upload`. If the board is on another serial port, change
+   `upload_port` in `platformio.ini`.
 
 ## Using it
 
-Status LED on the board:
+- **Print:** on an iPhone, Share → Print and pick the printer. On a Mac, add
+  it in System Settings → Printers & Scanners.
+- **Scan in a browser:** put the page on the glass and open
+  `http://canon-mg2500.local/scan` (your `HOSTNAME`).
+  - *Live to this browser* (150, 300 or 600 dpi): the page appears as it is
+    scanned; press **Save** at the end.
+  - *Keep on the printer* (150 dpi): you can close the page and come back
+    for the scan later.
+- **Scan on a Mac:** open Image Capture (or Preview → File → Import from
+  Scanner) and pick the printer.
+- **Status page** (ink levels, recent jobs): `http://canon-mg2500.local/`.
 
-| LED | Meaning |
-|---|---|
-| blinking yellow | ready, no printer connected |
-| solid green | printer connected, ready |
-| blinking green | printing or scanning |
-| fast red | the last test page failed |
-| blue flashes | "Identify" was pressed in the printer settings |
+The printer does one thing at a time: a print waits while it scans.
 
-BOOT button:
-- **press**: print an A4 colour test page
-- **hold 2 s while printing or scanning**: cancel the current job
+The board's LED: blinking yellow = no printer, green = ready, blinking
+green = printing or scanning, red = the last test page failed, blue =
+"Identify" in the printer settings. The BOOT button prints a test page;
+holding it 2 s cancels what is running.
 
-Supported: A4 and US Letter on plain paper, colour or grayscale, one-sided.
+## Updating over WiFi (MODE=debug)
 
-### Scanning
-
-Put the page on the glass and open `/scan` in a browser. Two modes:
-
-- **Live to this browser** (150, 300 or 600 dpi): the page appears while it
-  is scanned. Keep the browser page open until it is done, then press
-  **Save**. 600 dpi takes about four times as long as 300 dpi.
-- **Keep on the printer** (150 dpi): the scan is stored on the board, so you
-  can close the page and come back for it. It stays there until the next scan.
-
-Scans are colour JPEGs. The printer does one thing at a time: print jobs
-wait while it scans, and a scan can't start while it prints.
-
-On a Mac, the scanner also shows up in **Image Capture** and in Preview
-(File → Import from Scanner) under the printer's name, with no driver to
-install. Linux (sane-airscan) and Windows find it the same way.
-
-## Leaving the board at the printer (MODE=debug)
-
-With `MODE=debug` the board can be updated and debugged over WiFi, so it no
-longer needs to be plugged into a computer. Flash it once over USB with
-`MODE=debug` (this also installs the bootloader that makes updates safe),
-then:
+Once flashed with `MODE=debug`, the board no longer needs the computer:
 
 ```
-pio run -t ota          # build and update the firmware over WiFi
-pio run -t logs         # follow the board's log (Ctrl-C to stop)
-tools/remote.py info    # version, uptime, memory, tasks, last reset
-tools/remote.py crash   # after a crash: download and decode the core dump
+pio run -t ota      # build and install the new firmware over WiFi
+pio run -t logs     # watch the board's log
 ```
 
-The board is found as `<HOSTNAME>.local`; use `--host` with an IP address if
-that does not resolve. An update that does not come back online (WiFi and the
-debug server working for 20 s) is undone at the next restart, so a bad build
-cannot lock you out. The board also serves http://canon-mg2500.local:8080/
-(the debug server) and the live log on port 2323 (`nc canon-mg2500.local 2323`).
-
-Anyone on your network can update the firmware in this mode. Switching back
-to `MODE=normal` over WiFi turns the WiFi updates off; the next update then
-needs USB.
+A new firmware that doesn't come back online is undone automatically, so a
+bad build can't lock you out. Anyone on your WiFi can update the board in
+this mode.
 
 ## Trying it without the printer
 
-Set `MODE=dev` in `.env` and flash again. Print jobs are processed in full
-but nothing is sent to the printer, so no paper is used. Scans come from a
-built-in test page instead of the scanner. Useful to check WiFi, discovery,
-printing and scanning from your devices first.
+Set `MODE=dev` and flash: print jobs are processed but not printed, and
+scans show a built-in test page.
+
+Technical details are in [AGENTS.md](AGENTS.md).

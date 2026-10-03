@@ -1,0 +1,29 @@
+# PlatformIO / ESP-IDF build output
+.pio/
+.vscode/
+managed_components/
+dependencies.lock
+# generated from sdkconfig.defaults + Kconfig on every build
+sdkconfig.esp32s3
+sdkconfig.qemu
+sdkconfig.old
+
+# local settings (WiFi credentials); the committed template is .env.example
+.env
+# generated from .env.example + .env by tools/gen_local_config.py
+src/local_config.h
+
+# host test harness output
+host/bjl_host
+host/bjl_host.dSYM/
+host/out/
+host/*.prn
+host/*.png
+host/*.raw
+
+# downloaded / built Gutenprint reference
+tools/gutenprint_ref/build/
+
+__pycache__/
+*.pyc
+.DS_Store

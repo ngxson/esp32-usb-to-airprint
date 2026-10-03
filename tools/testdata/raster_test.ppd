@@ -1,0 +1,55 @@
+*PPD-Adobe: "4.3"
+*% Minimal PPD so that macOS `cupsfilter` can produce the raster formats an
+*% AirPrint / IPP Everywhere client sends (image/urf, image/pwg-raster).
+*% Select the output with -m; resolution/colour with -o.
+*FormatVersion: "4.3"
+*FileVersion: "1.0"
+*LanguageVersion: English
+*LanguageEncoding: ISOLatin1
+*PCFileName: "RASTEST.PPD"
+*Manufacturer: "Test"
+*Product: "(Raster Test)"
+*ModelName: "Raster Test"
+*ShortNickName: "Raster Test"
+*NickName: "Raster Test"
+*PSVersion: "(3010.000) 0"
+*LanguageLevel: "3"
+*ColorDevice: True
+*DefaultColorSpace: RGB
+*FileSystem: False
+*Throughput: "1"
+*LandscapeOrientation: Plus90
+*TTRasterizer: Type42
+*cupsVersion: 2.3
+*cupsFilter2: "image/urf image/urf 0 -"
+*cupsFilter2: "image/pwg-raster image/pwg-raster 0 -"
+*OpenUI *PageSize/Media Size: PickOne
+*OrderDependency: 10 AnySetup *PageSize
+*DefaultPageSize: A4
+*PageSize A4/A4: "<</PageSize[595.28 841.89]>>setpagedevice"
+*PageSize Letter/US Letter: "<</PageSize[612 792]>>setpagedevice"
+*CloseUI: *PageSize
+*OpenUI *PageRegion/Media Size: PickOne
+*OrderDependency: 10 AnySetup *PageRegion
+*DefaultPageRegion: A4
+*PageRegion A4/A4: "<</PageSize[595.28 841.89]>>setpagedevice"
+*PageRegion Letter/US Letter: "<</PageSize[612 792]>>setpagedevice"
+*CloseUI: *PageRegion
+*DefaultImageableArea: A4
+*ImageableArea A4/A4: "10 15 585.28 832.89"
+*ImageableArea Letter/US Letter: "10 15 602 783"
+*DefaultPaperDimension: A4
+*PaperDimension A4/A4: "595.28 841.89"
+*PaperDimension Letter/US Letter: "612 792"
+*OpenUI *ColorModel/Color Mode: PickOne
+*OrderDependency: 10 AnySetup *ColorModel
+*DefaultColorModel: RGB
+*ColorModel RGB/Color: "<</cupsColorSpace 19/cupsBitsPerColor 8/cupsColorOrder 0/cupsCompression 0>>setpagedevice"
+*ColorModel Gray/Grayscale: "<</cupsColorSpace 18/cupsBitsPerColor 8/cupsColorOrder 0/cupsCompression 0>>setpagedevice"
+*CloseUI: *ColorModel
+*OpenUI *Resolution/Resolution: PickOne
+*OrderDependency: 10 AnySetup *Resolution
+*DefaultResolution: 600dpi
+*Resolution 300dpi/300 DPI: "<</HWResolution[300 300]>>setpagedevice"
+*Resolution 600dpi/600 DPI: "<</HWResolution[600 600]>>setpagedevice"
+*CloseUI: *Resolution

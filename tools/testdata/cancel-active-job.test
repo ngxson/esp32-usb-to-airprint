@@ -1,0 +1,58 @@
+# Finds the job that is currently printing, checks its status while printing,
+# then cancels it.
+{
+	NAME "Find the processing job"
+	OPERATION Get-Jobs
+	GROUP operation-attributes-tag
+	ATTR charset attributes-charset utf-8
+	ATTR naturalLanguage attributes-natural-language en
+	ATTR uri printer-uri $uri
+	ATTR keyword which-jobs not-completed
+	ATTR keyword requested-attributes job-id,job-state,job-impressions-completed
+	STATUS successful-ok
+	EXPECT job-id OF-TYPE integer COUNT 1 DEFINE-VALUE JOBID
+	EXPECT job-state WITH-VALUE 5
+}
+{
+	NAME "Printer state is processing"
+	OPERATION Get-Printer-Attributes
+	GROUP operation-attributes-tag
+	ATTR charset attributes-charset utf-8
+	ATTR naturalLanguage attributes-natural-language en
+	ATTR uri printer-uri $uri
+	ATTR keyword requested-attributes printer-state,queued-job-count
+	STATUS successful-ok
+	EXPECT printer-state WITH-VALUE 4
+	EXPECT queued-job-count WITH-VALUE 1
+}
+{
+	NAME "Second job is refused while busy"
+	OPERATION Validate-Job
+	GROUP operation-attributes-tag
+	ATTR charset attributes-charset utf-8
+	ATTR naturalLanguage attributes-natural-language en
+	ATTR uri printer-uri $uri
+	STATUS successful-ok
+}
+{
+	NAME "Cancel the job"
+	OPERATION Cancel-Job
+	GROUP operation-attributes-tag
+	ATTR charset attributes-charset utf-8
+	ATTR naturalLanguage attributes-natural-language en
+	ATTR uri printer-uri $uri
+	ATTR integer job-id $JOBID
+	STATUS successful-ok
+}
+{
+	NAME "Job ends up canceled"
+	OPERATION Get-Job-Attributes
+	GROUP operation-attributes-tag
+	ATTR charset attributes-charset utf-8
+	ATTR naturalLanguage attributes-natural-language en
+	ATTR uri printer-uri $uri
+	ATTR integer job-id $JOBID
+	STATUS successful-ok
+	EXPECT job-state WITH-VALUE 7 REPEAT-NO-MATCH
+	EXPECT job-state-reasons WITH-VALUE job-canceled-by-user
+}

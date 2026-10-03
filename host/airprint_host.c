@@ -1,0 +1,89 @@
+// Runs the AirPrint server on the development machine for testing with
+// ipptool / CUPS. Each job's printer stream is written to out/job-<n>.prn.
+//
+//   ./airprint_host [port]          (default 8631)
+#include <signal.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+
+#include "airprint.h"
+
+static FILE *s_out;
+static int s_job;
+
+static void get_status(void *ctx, airprint_status_t *st)
+{
+    st->connected = true;
+    st->nsupplies = 2;
+    st->supply[0].name = "Black";
+    st->supply[0].color = "#000000";
+    st->supply[0].level = 60;
+    st->supply[1].name = "Color";
+    st->supply[1].color = "#00FFFF#FF00FF#FFFF00";
+    st->supply[1].level = 5;
+    st->reasons[st->nreasons++] = "marker-supply-low-warning";
+}
+
+static int job_open(void *ctx)
+{
+    char path[64];
+    snprintf(path, sizeof(path), "out/job-%d.prn", ++s_job);
+    s_out = fopen(path, "wb");
+    fprintf(stderr, "host: job output -> %s\n", path);
+    return s_out ? 0 : -1;
+}
+
+static int s_slow_us;    // AIRPRINT_HOST_SLOW_US: delay per write, emulates a slow printer
+
+static int job_write(void *ctx, const uint8_t *data, size_t len)
+{
+    if (s_slow_us)
+        usleep(s_slow_us);
+    return fwrite(data, 1, len, s_out) == len ? 0 : -1;
+}
+
+static int job_sync(void *ctx, const char *what)
+{
+    fprintf(stderr, "host: sync %s\n", what);
+    return 0;
+}
+
+static void job_close(void *ctx, bool ok)
+{
+    fclose(s_out);
+    s_out = NULL;
+    fprintf(stderr, "host: job closed (%s)\n", ok ? "ok" : "printer error");
+}
+
+static void identify(void *ctx)
+{
+    fprintf(stderr, "host: identify (LED would blink)\n");
+}
+
+int main(int argc, char **argv)
+{
+    signal(SIGPIPE, SIG_IGN);
+    static airprint_config_t cfg = {
+        .name = "Canon MG2500 (host test)",
+        .make_model = "Canon MG2500 series",
+        .uuid = "a4d1e9b2-0b6f-4c3e-9d2a-5e8f7c6b1a00",
+        .device_id = "MFG:Canon;MDL:MG2500 series;CMD:URF,PWG;",
+        .port = 8631,
+        .get_status = get_status,
+        .job_open = job_open,
+        .job_write = job_write,
+        .job_sync = job_sync,
+        .job_close = job_close,
+        .identify = identify,
+    };
+    if (argc > 1)
+        cfg.port = atoi(argv[1]);
+    if (getenv("AIRPRINT_HOST_SLOW_US"))
+        s_slow_us = atoi(getenv("AIRPRINT_HOST_SLOW_US"));
+    if (airprint_start(&cfg) != 0)
+        return 1;
+    for (;;)
+        pause();
+}

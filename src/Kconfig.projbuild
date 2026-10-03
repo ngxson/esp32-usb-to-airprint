@@ -1,0 +1,27 @@
+menu "Printer server"
+
+    choice PRINTER_RESOLUTION
+        prompt "Test page resolution"
+        default PRINTER_RES_600
+        help
+            Canon MG2500 plain-paper print mode used for the test page.
+        config PRINTER_RES_300
+            bool "300x300 dpi (fast, CMYK 1 bit)"
+        config PRINTER_RES_600
+            bool "600x600 dpi (standard, C/M 3-level)"
+    endchoice
+
+    config STATUS_LED_GPIO
+        int "WS2812 status LED GPIO"
+        default 48
+
+    config STATUS_LED_BRIGHTNESS
+        int "Status LED brightness (percent)"
+        range 1 100
+        default 10
+
+    config PRINT_BUTTON_GPIO
+        int "Print button GPIO (active low)"
+        default 0
+
+endmenu

@@ -122,6 +122,7 @@ if [ -n "${AIRPRINT:-}" ]; then
     curl -s -X POST "$S/last" > /dev/null; sleep 1
     echo "kept scan that does not fit: $(curl -s $S/status | grep -oE '"error":"[^"]*"'), last.jpg $(curl -s -o /dev/null -w '%{http_code}' $S/last.jpg)"
     kill $SERVER; wait $SERVER 2>/dev/null || true
+    echo "calibration: $(grep -c 'ready after .*(calibrated)' host/out/airprint-scan.log) scan(s) calibrated, $(grep -c 'no calibration' host/out/airprint-scan.log) without (once per server run)"
     (cd host && FAKE_SCANNER_KBPS=4000 exec ./airprint_host $PORT >> out/airprint-scan.log 2>&1) &
     SERVER=$!
     sleep 1

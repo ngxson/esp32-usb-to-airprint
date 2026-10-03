@@ -129,7 +129,7 @@
   </section>
 
   <section class="card preview-card">
-    <div class="paper" style:aspect-ratio={aspect}>
+    <div class="paper" style:aspect-ratio={aspect} style:width={`min(100%, 520px, calc(70vh * ${aspect}))`}>
       {#if scanUi.preview && (scanning || st?.state === 'done' || scanUi.lastFile)}
         <img src={scanUi.preview} alt="Scanned page" />
       {:else}
@@ -208,8 +208,6 @@
   }
   .paper {
     position: relative;
-    width: min(100%, 520px);
-    max-height: 70vh;
     background: var(--paper);
     border-radius: 6px;
     box-shadow:
@@ -219,10 +217,11 @@
     display: grid;
   }
   .paper img {
+    position: absolute;
+    inset: 0;
     width: 100%;
     height: 100%;
     object-fit: contain;
-    object-position: top;
   }
   .placeholder {
     display: grid;
@@ -273,8 +272,7 @@
   .thumb img {
     width: 100%;
     height: 100%;
-    object-fit: cover;
-    object-position: top;
+    object-fit: contain;
   }
   @media (max-width: 900px) {
     .layout {

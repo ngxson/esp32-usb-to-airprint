@@ -29,6 +29,7 @@ typedef struct {
     // --- internal
     int stage;
     int gamma_count, status_polls, block_no;
+    int ready_polls;            // status polls until ready: longer when calibrating
     uint64_t total;
     uint32_t rng;
     uint8_t *resp;

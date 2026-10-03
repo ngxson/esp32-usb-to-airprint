@@ -51,8 +51,10 @@ static void show_idle_state(void)
 
 static void on_printer(bool connected, const usb_printer_info_t *info)
 {
-    if (connected)
+    if (connected) {
         ESP_LOGI(TAG, "printer ready: %s %s", info->manufacturer, info->product);
+        scan_service_recalibrate();     // maybe powered off and on: calibrate again
+    }
     show_idle_state();
 }
 

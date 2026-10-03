@@ -108,10 +108,8 @@
   img {
     width: 100%;
     aspect-ratio: 3 / 4;
-    object-fit: cover;
-    object-position: top;
-    background: var(--paper);
-    border-radius: 4px;
+    object-fit: contain;
+    filter: drop-shadow(0 1px 3px rgba(0, 0, 0, 0.18));
   }
   .tick {
     position: absolute;

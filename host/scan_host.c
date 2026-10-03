@@ -123,6 +123,7 @@ static void test_protocol(void)
         CHECK(s.mismatches == 0, "scan %zu: %d lines differ from the test page", i, s.mismatches);
         CHECK(f.x == p.x - p.x % 32 && f.wx % 32 == 0 && f.wx >= p.w + p.x % 32, "scan %zu: x %d wx %d", i, f.x, f.wx);
         expect_closed(&f, "scan");
+        CHECK(f.ready_polls == (p.calibrate ? 8 : 1), "scan %zu: calibration flag not seen", i);
         CHECK(f.scans == ++scans, "scan %zu: scanner counted %d complete scans", i, f.scans);
         printf("scan %d dpi %dx%d at (%d,%d): ok\n", p.dpi, p.w, p.h, p.x, p.y);
     }

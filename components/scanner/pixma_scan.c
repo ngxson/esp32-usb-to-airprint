@@ -45,7 +45,8 @@ enum {
 #define IMAGE_BLOCK_SIZE (512 * 1024)   // block size SANE asks for; read in pieces
 #define IO_TIMEOUT_MS 1000              // PIXMA_BULKIN/BULKOUT_TIMEOUT
 #define RESPONSE_TRIES 8                // rec_tmo: 8 x 1 s for a reply
-#define CALIBRATION_TRIES 120           // wait_until_ready: 120 x 1 s
+#define READY_POLL_MS 250               // wait_until_ready: status every 250 ms,
+#define READY_TIMEOUT_S 120             // for at most 120 s (a calibration takes seconds)
 #define MAX_ZLP 4
 
 #define XML_START_1                                                                                 \
@@ -281,23 +282,27 @@ static int send_scan_param(scan_t *s)
     return exec(s);
 }
 
-// status byte 0 bit 0 or 1: calibrated (is_calibrated, generation >= 3)
+// status byte 0 bit 0 or 1: calibrated (is_calibrated, generation >= 3).
+// SANE polls every second; a quicker poll saves half a second on average.
 static int wait_until_ready(scan_t *s)
 {
-    for (int tries = CALIBRATION_TRIES;; tries--) {
+    for (int polls = 0;; polls++) {
         new_cmd(s, CMD_STATUS_3, 0, 8);
         int err = exec(s);
         if (err < 0)
             return err;
-        if (s->cmd[RES_HDR] & 0x03)
+        if (s->cmd[RES_HDR] & 0x03) {
+            LOGI("scanner ready after %d ms (%s)", polls * READY_POLL_MS,
+                 s->p->calibrate ? "calibrated" : "no calibration");
             return PIXMA_OK;
-        if (tries == 0) {
-            LOGW("scanner not ready after %d s", CALIBRATION_TRIES);
+        }
+        if (polls * READY_POLL_MS >= READY_TIMEOUT_S * 1000) {
+            LOGW("scanner not ready after %d s", READY_TIMEOUT_S);
             return PIXMA_ETIMEDOUT;
         }
         if (canceled(s))
             return PIXMA_ECANCELED;
-        sleep_ms(s, 1000);
+        sleep_ms(s, READY_POLL_MS);
     }
 }
 

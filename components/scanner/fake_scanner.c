@@ -15,7 +15,7 @@ enum { ST_IDLE, ST_JOB, ST_MODE, ST_SESSION, ST_PARAMS, ST_SCANNING };
 
 #define MAX_BLOCK 20000             // image block sizes 1..MAX_BLOCK
 #define RESP_CAP (MAX_BLOCK + 64)   // also holds the XML replies
-#define CALIBRATION_POLLS 2
+#define CALIBRATION_POLLS 8     // status polls a calibration takes; 1 without
 
 static void violation(fake_scanner_t *f, const char *fmt, ...)
 {
@@ -232,7 +232,7 @@ static void gen_image(fake_scanner_t *f, uint8_t *out, size_t n)
 
 static void read_image(fake_scanner_t *f, uint32_t max)
 {
-    if (f->stage != ST_SCANNING || f->status_polls < CALIBRATION_POLLS) {
+    if (f->stage != ST_SCANNING || f->status_polls < f->ready_polls) {
         violation(f, "image read before the scanner was ready");
         reply_failed(f);
         return;
@@ -286,6 +286,7 @@ static void scan_param(fake_scanner_t *f, const uint8_t *d)
     f->wx = wx;
     f->h = h;
     f->total = (uint64_t)wx * 3 * h;
+    f->ready_polls = d[0x05] & 1 ? CALIBRATION_POLLS : 1;
     f->image_bytes = 0;
     f->raw_y = -1;
     f->raw_pos = (size_t)wx * 3;
@@ -375,7 +376,7 @@ static void handle_cmd(fake_scanner_t *f, const uint8_t *d, size_t len)
         break;
     case 0xda20: {  // status: calibrated after a few polls
         uint8_t *s = reply(f, 0x0606, 8);
-        if (f->stage == ST_SCANNING && ++f->status_polls >= CALIBRATION_POLLS)
+        if (f->stage == ST_SCANNING && ++f->status_polls >= f->ready_polls)
             s[0] = 0x01;
         seal(f);
         break;

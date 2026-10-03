@@ -55,6 +55,9 @@ void scan_service_cancel(void);
 // A kept scan as the device's button starts it: an A4 page at 150 dpi.
 // Returns 0, or an HTTP status and the reason in *why.
 int scan_service_start_button(const char **why);
+// The next scan calibrates (the scanner was attached again). The first scan
+// after boot always does; later ones skip it, as SANE does within a session.
+void scan_service_recalibrate(void);
 // events.h source: the scan state as JSON (also GET /scan/status).
 int scan_service_status_json(void *ctx, char *buf, size_t n);
 

@@ -50,7 +50,7 @@ typedef struct {
 typedef struct {
     int dpi;                    // 75, 150, 300 or 600
     int x, y, w, h;             // scan area in pixels at dpi
-    bool calibrate;             // calibrate before scanning (SANE does on every scanimage run)
+    bool calibrate;             // calibrate before scanning (SANE's default: the first scan of a session)
 } pixma_params_t;
 
 // One scanned line: w pixels of 8-bit RGB. Return non-zero to stop the scan.

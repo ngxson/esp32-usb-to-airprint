@@ -87,6 +87,7 @@ static struct {
     const char *source;         // who started it: "web", "stream", "button", "escl"
     int readers;                // connections reading the kept scan while it is written
     bool released;              // the buffer was given back (kept or not)
+    bool calibrated;            // since the scanner was attached (SANE: once per session)
     unsigned seq;
     uint32_t boot;
 } S;
@@ -184,8 +185,10 @@ static void *scan_thread(void *arg)
     int err = PIXMA_ENOMEM;
     jpeg_enc_t *e = jpeg_enc_create(S.width, S.height, QUALITY, S.dpi, sink, NULL);
     if (e) {
-        pixma_params_t p = {.dpi = S.dpi, .x = S.x, .y = S.y, .w = S.width, .h = S.height, .calibrate = true};
+        pixma_params_t p = {.dpi = S.dpi, .x = S.x, .y = S.y, .w = S.width, .h = S.height, .calibrate = !S.calibrated};
         err = pixma_scan(&s_cfg->io, &p, on_line, e, &S.cancel);
+        // calibrating takes seconds: once, and again after a failure
+        S.calibrated = err == PIXMA_OK || (err == PIXMA_ECANCELED && S.calibrated);
     }
     s_cfg->close(s_cfg->ctx);       // printing may go on while the stream drains
     if (s_cfg->state)
@@ -936,6 +939,11 @@ void scan_service_init(const scan_config_t *cfg)
 bool scan_service_active(void)
 {
     return S.running;
+}
+
+void scan_service_recalibrate(void)
+{
+    S.calibrated = false;
 }
 
 void scan_service_cancel(void)

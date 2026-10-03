@@ -205,7 +205,7 @@
     display: block;
     aspect-ratio: 4 / 3.6;
     border: 0;
-    padding: 12px 12px 0;
+    padding: 12px;
     background: var(--surface-3);
     border-radius: var(--radius) var(--radius) 0 0;
     cursor: pointer;
@@ -214,11 +214,8 @@
   .thumb img {
     width: 100%;
     height: 100%;
-    object-fit: cover;
-    object-position: top;
-    background: var(--paper);
-    border-radius: 4px 4px 0 0;
-    box-shadow: 0 1px 6px rgba(0, 0, 0, 0.12);
+    object-fit: contain;
+    filter: drop-shadow(0 1px 4px rgba(0, 0, 0, 0.18));
   }
   .badge {
     position: absolute;

@@ -15,6 +15,15 @@ OUT=$(cd $OUT && pwd)
 echo "== host unit tests"
 make -C host -s
 host/bjl_host selftest
+host/scan_host selftest 2>/dev/null | tail -1
+
+echo "== scans from the emulated scanner (JPEGs in $OUT/)"
+for s in "150 a4" "300 a4" "300 letter" "600 letter"; do
+    set -- $s
+    host/scan_host scan $1 $2 $OUT/scan$1-$2.jpg $OUT/scan$1-$2.ppm 2>/dev/null | sed 's/, 0 protocol violations//'
+    python3 tools/check_jpeg.py $OUT/scan$1-$2.jpg --ref $OUT/scan$1-$2.ppm --dpi $1 --min-psnr 38
+    rm -f $OUT/scan$1-$2.ppm
+done
 
 echo "== test page streams (decoded previews in $OUT/)"
 for dpi in 300 600; do
@@ -79,6 +88,37 @@ if [ -n "${AIRPRINT:-}" ]; then
     wait $CLIENT || true
     echo "original Print-Job client: $(grep -oE 'PASS|FAIL' $OUT/printjob.log)"
     kill $SERVER; wait $SERVER 2>/dev/null || true
+
+    echo "== scanning over HTTP (emulated scanner)"
+    PORT=8633
+    S=http://localhost:$PORT/scan
+    # 64 KB buffer: a streamed 300 dpi page wraps the ring several times
+    (cd host && FAKE_SCANNER_KBPS=0 SCAN_BUF_KB=64 exec ./airprint_host $PORT > out/airprint-scan.log 2>&1) &
+    SERVER=$!
+    sleep 1
+    curl -s -o $OUT/http300.jpg "$S/stream.jpg?dpi=300&paper=a4"
+    cmp -s $OUT/http300.jpg $OUT/scan300-a4.jpg && echo "stream 300 dpi through a 64 KB ring: identical to the direct scan" \
+        || echo "stream 300 dpi DIFFERS from the direct scan"
+    curl -s -X POST "$S/last" > /dev/null; sleep 1
+    echo "kept scan that does not fit: $(curl -s $S/status | grep -oE '"error":"[^"]*"'), last.jpg $(curl -s -o /dev/null -w '%{http_code}' $S/last.jpg)"
+    kill $SERVER; wait $SERVER 2>/dev/null || true
+    (cd host && FAKE_SCANNER_KBPS=4000 exec ./airprint_host $PORT >> out/airprint-scan.log 2>&1) &
+    SERVER=$!
+    sleep 1
+    curl -s -X POST "$S/last?paper=a4" > /dev/null
+    echo "second scan while one runs: $(curl -s -o /dev/null -w '%{http_code}' "$S/stream.jpg?dpi=150")"
+    for i in $(seq 1 60); do curl -s $S/status | grep -q '"state":"scanning"' || break; sleep 1; done
+    curl -s -o $OUT/last150.jpg $S/last.jpg
+    cmp -s $OUT/last150.jpg $OUT/scan150-a4.jpg && echo "kept 150 dpi scan: identical to the direct scan" \
+        || echo "kept 150 dpi scan DIFFERS from the direct scan"
+    curl -s -o /dev/null --max-time 3 "$S/stream.jpg?dpi=300" || true    # client leaves mid-scan
+    sleep 2
+    echo "client left mid-scan: $(curl -s $S/status | grep -oE '"state":"[a-z]+"')"
+    curl -s -o $OUT/http150.jpg "$S/stream.jpg?dpi=150" & CLIENT=$!
+    sleep 3; curl -s -X POST $S/cancel > /dev/null; wait $CLIENT || true
+    echo "canceled: $(curl -s $S/status | grep -oE '"state":"[a-z]+"'), $(python3 tools/check_jpeg.py $OUT/http150.jpg --size 1240x1754 | cut -d: -f2-)"
+    kill $SERVER; wait $SERVER 2>/dev/null || true
+    grep -h "protocol violations" host/out/airprint-scan.log | sort | uniq -c | sed 's/^ */  scanner closed: /'
     trap - EXIT
 fi
 

@@ -1,0 +1,4 @@
+# Added to sdkconfig.defaults for the qemu env only: QEMU does not emulate the
+# quad I/O read command, so direct flash reads (OTA image checks, core dump)
+# return garbage there with QIO
+CONFIG_ESPTOOLPY_FLASHMODE_DIO=y

@@ -1,5 +1,5 @@
 // USB host driver for a single USB printer-class device (interface class 7)
-// on the ESP32-S3 OTG port.
+// on the ESP32-S3 OTG port, plus the scanner function of the same device.
 #pragma once
 
 #include <stdbool.h>
@@ -58,3 +58,20 @@ void usb_printer_cancel(void);
 esp_err_t usb_printer_soft_reset(void);
 // Printer class GET_PORT_STATUS: bit 5 paper empty, bit 4 selected, bit 3 no error.
 esp_err_t usb_printer_port_status(uint8_t *status);
+
+// --- scanner: the device's vendor-specific interface (interface 0 on the
+// MG2500), Canon's pixma protocol on its bulk endpoints. A scan holds the
+// device like a print job: one or the other.
+#define USB_SCAN_ERROR (-1)
+#define USB_SCAN_TIMEOUT (-2)
+#define USB_SCAN_MAX_READ 8192      // = PIXMA_READ_CHUNK
+
+bool usb_scanner_present(void);
+bool usb_scanner_active(void);
+esp_err_t usb_scanner_begin(void);
+// Synchronous bulk transfers: bytes transferred (0 = zero-length packet),
+// USB_SCAN_TIMEOUT or USB_SCAN_ERROR. A read returns one USB transfer of up
+// to len (<= USB_SCAN_MAX_READ) bytes.
+int usb_scanner_write(const uint8_t *data, size_t len, uint32_t timeout_ms);
+int usb_scanner_read(uint8_t *buf, size_t len, uint32_t timeout_ms);
+void usb_scanner_end(void);

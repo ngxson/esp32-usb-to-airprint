@@ -90,7 +90,7 @@ static int s_connections;
 // ===========================================================================
 // HTTP connection
 
-typedef struct {
+struct airprint_http {
     int fd;
     uint8_t buf[2048];
     size_t pos, len;
@@ -99,12 +99,15 @@ typedef struct {
     char path[128];
     char host[96];
     bool keep_alive;
+    bool http10;                // HTTP/1.0 client: no chunked responses
+    bool chunked_out;           // streaming response uses chunked encoding
     // body
     bool chunked;
     int64_t remaining;          // Content-Length mode: bytes left; chunked: bytes left in chunk
     bool body_eof;
     bool in_chunks;             // a chunk was read: CRLF precedes the next size line
-} conn_t;
+};
+typedef struct airprint_http conn_t;
 
 static int conn_fill(conn_t *c)
 {
@@ -255,6 +258,61 @@ static void send_http(conn_t *c, const char *status, const char *type, const voi
                      type, (unsigned)len, c->keep_alive ? "keep-alive" : "close");
     if (send_all(c->fd, hdr, n) == 0 && len)
         send_all(c->fd, body, len);
+}
+
+void airprint_http_send(airprint_http_t *c, const char *status, const char *type, const void *body, size_t len)
+{
+    send_http(c, status, type, body, len);
+}
+
+int airprint_http_stream_begin(airprint_http_t *c, const char *type, const char *extra_headers)
+{
+    // a client that stops reading must not block the sender forever
+    struct timeval tv = {.tv_sec = 30};
+    setsockopt(c->fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
+    c->chunked_out = !c->http10;
+    if (!c->chunked_out)
+        c->keep_alive = false;      // the end of the body is the end of the connection
+    char hdr[512];
+    int n = snprintf(hdr, sizeof(hdr), "HTTP/1.1 200 OK\r\nContent-Type: %s\r\n%s%sConnection: %s\r\n\r\n", type,
+                     c->chunked_out ? "Transfer-Encoding: chunked\r\n" : "", extra_headers ? extra_headers : "",
+                     c->keep_alive ? "keep-alive" : "close");
+    if (n >= (int)sizeof(hdr) || send_all(c->fd, hdr, (size_t)n) < 0) {
+        c->keep_alive = false;
+        return -1;
+    }
+    return 0;
+}
+
+int airprint_http_stream_write(airprint_http_t *c, const void *data, size_t len)
+{
+    if (!len)
+        return 0;
+    if (c->chunked_out) {
+        char size[16];
+        int n = snprintf(size, sizeof(size), "%x\r\n", (unsigned)len);
+        if (send_all(c->fd, size, (size_t)n) < 0 || send_all(c->fd, data, len) < 0 || send_all(c->fd, "\r\n", 2) < 0) {
+            c->keep_alive = false;
+            return -1;
+        }
+        return 0;
+    }
+    if (send_all(c->fd, data, len) < 0) {
+        c->keep_alive = false;
+        return -1;
+    }
+    return 0;
+}
+
+int airprint_http_stream_end(airprint_http_t *c)
+{
+    struct timeval tv = {0};
+    setsockopt(c->fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
+    if (c->chunked_out && send_all(c->fd, "0\r\n\r\n", 5) < 0) {
+        c->keep_alive = false;
+        return -1;
+    }
+    return 0;
 }
 
 // ===========================================================================
@@ -1231,13 +1289,7 @@ static void handle_get(conn_t *c)
         return;
     }
     if (strcmp(c->path, "/") != 0) {
-        const uint8_t *data;
-        size_t len;
-        const char *type = "application/octet-stream";
-        if (s_cfg->get_file && s_cfg->get_file(s_cfg->ctx, c->path, &data, &len, &type))
-            send_http(c, "200 OK", type, data, len);
-        else
-            send_http(c, "404 Not Found", "text/plain", "not found", 9);
+        send_http(c, "404 Not Found", "text/plain", "not found", 9);
         return;
     }
     airprint_status_t st;
@@ -1251,9 +1303,10 @@ static void handle_get(conn_t *c)
                      "<!doctype html><html><head><meta charset=utf-8><meta name=viewport "
                      "content='width=device-width'><title>%s</title><style>body{font-family:sans-serif;"
                      "max-width:40em;margin:2em auto;padding:0 1em}td{padding:.2em 1em .2em 0}</style></head>"
-                     "<body><h1>%s</h1><p>%s &middot; %s</p><table>",
+                     "<body><h1>%s</h1><p>%s &middot; %s</p>%s<table>",
                      s_cfg->name, s_cfg->name, s_cfg->make_model,
-                     st.connected ? (st.message[0] ? st.message : "Ready") : "Printer not connected");
+                     st.connected ? (st.message[0] ? st.message : "Ready") : "Printer not connected",
+                     s_cfg->home_html ? s_cfg->home_html : "");
     for (int i = 0; i < st.nsupplies && n < 3500; i++)
         n += snprintf(html + n, 4096 - n, "<tr><td>%s ink</td><td>%s%d%%</td></tr>", st.supply[i].name,
                       st.supply[i].level < 0 ? "unknown " : "", st.supply[i].level < 0 ? 0 : st.supply[i].level);
@@ -1292,7 +1345,8 @@ static void *conn_thread(void *arg)
         char version[16] = "";
         if (sscanf(line, "%7s %127s %15s", c->method, c->path, version) < 2)
             break;
-        c->keep_alive = strcmp(version, "HTTP/1.0") != 0;
+        c->http10 = strcmp(version, "HTTP/1.0") == 0;
+        c->keep_alive = !c->http10;
         c->chunked = false;
         c->remaining = 0;
         c->body_eof = false;
@@ -1330,11 +1384,17 @@ static void *conn_thread(void *arg)
         if (expect_continue && !c->body_eof)
             send_all(c->fd, "HTTP/1.1 100 Continue\r\n\r\n", 25);
 
-        if (!strcmp(c->method, "POST")) {
+        bool ipp_path = !strcmp(c->path, "/") || !strncmp(c->path, "/ipp", 4);
+        if (!strcmp(c->method, "POST") && (ipp_path || !s_cfg->http_handler)) {
             handle_ipp(c);
+        } else if (!strcmp(c->method, "POST")) {
+            drain_body(c);
+            if (!s_cfg->http_handler(s_cfg->ctx, c, c->method, c->path))
+                send_http(c, "404 Not Found", "text/plain", "not found", 9);
         } else if (!strcmp(c->method, "GET") || !strcmp(c->method, "HEAD")) {
             drain_body(c);
-            handle_get(c);
+            if (!s_cfg->http_handler || !s_cfg->http_handler(s_cfg->ctx, c, c->method, c->path))
+                handle_get(c);
         } else {
             drain_body(c);
             c->keep_alive = false;
@@ -1353,16 +1413,16 @@ static void *conn_thread(void *arg)
 
 static void *listen_thread(void *arg)
 {
-    (void)arg;
+    int port = (int)(intptr_t)arg;
     int ls = socket(AF_INET, SOCK_STREAM, 0);
     int one = 1;
     setsockopt(ls, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one));
-    struct sockaddr_in addr = {.sin_family = AF_INET, .sin_port = htons(s_cfg->port), .sin_addr.s_addr = INADDR_ANY};
+    struct sockaddr_in addr = {.sin_family = AF_INET, .sin_port = htons(port), .sin_addr.s_addr = INADDR_ANY};
     if (ls < 0 || bind(ls, (struct sockaddr *)&addr, sizeof(addr)) || listen(ls, 4)) {
-        LOGW("cannot listen on port %d (errno %d)", s_cfg->port, errno);
+        LOGW("cannot listen on port %d (errno %d)", port, errno);
         return NULL;
     }
-    LOGI("IPP server listening on port %d", s_cfg->port);
+    LOGI("%s server listening on port %d", port == s_cfg->port ? "IPP" : "web", port);
     for (;;) {
         int fd = accept(ls, NULL, NULL);
         if (fd < 0)
@@ -1411,7 +1471,9 @@ int airprint_start(const airprint_config_t *cfg)
     pthread_attr_setstacksize(&attr, LISTEN_STACK_SIZE);
     pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
     pthread_t th;
-    int r = pthread_create(&th, &attr, listen_thread, NULL);
+    int r = pthread_create(&th, &attr, listen_thread, (void *)(intptr_t)cfg->port);
+    if (r == 0 && cfg->web_port)
+        r = pthread_create(&th, &attr, listen_thread, (void *)(intptr_t)cfg->web_port);
     pthread_attr_destroy(&attr);
     return r;
 }

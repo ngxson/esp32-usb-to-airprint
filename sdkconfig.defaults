@@ -20,7 +20,7 @@ CONFIG_SPIRAM_IGNORE_NOTFOUND=y
 CONFIG_LWIP_TCP_WND_DEFAULT=32768
 CONFIG_LWIP_TCP_SND_BUF_DEFAULT=16384
 CONFIG_LWIP_TCP_RECVMBOX_SIZE=32
-CONFIG_LWIP_MAX_SOCKETS=12
+CONFIG_LWIP_MAX_SOCKETS=24
 CONFIG_MDNS_MAX_SERVICES=4
 # QEMU's emulated Ethernet, used only by the qemu self test build
 CONFIG_ETH_USE_OPENETH=y
@@ -32,3 +32,13 @@ CONFIG_ESP32S3_DATA_CACHE_64KB=y
 CONFIG_ESP32S3_DATA_CACHE_LINE_64B=y
 # ESP32-S3-N16R8 flash supports quad I/O
 CONFIG_ESPTOOLPY_FLASHMODE_QIO=y
+# Remote updates (MODE=debug): a new image that does not confirm itself
+# (debug_ota_confirm) is replaced by the previous one at the next boot.
+# Lives in the bootloader: only takes effect after a flash over USB.
+CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y
+# Crashes leave an ELF core dump in the "coredump" partition
+CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH=y
+CONFIG_ESP_COREDUMP_DATA_FORMAT_ELF=y
+# task list on the debug server's /info
+CONFIG_FREERTOS_USE_TRACE_FACILITY=y
+CONFIG_FREERTOS_USE_STATS_FORMATTING_FUNCTIONS=y

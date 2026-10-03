@@ -16,6 +16,8 @@ src/local_config.h
 # host test harness output
 host/bjl_host
 host/bjl_host.dSYM/
+host/scan_host
+host/scan_host.dSYM/
 host/out/
 host/*.prn
 host/*.png

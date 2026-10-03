@@ -1,12 +1,16 @@
 // ESP32-S3 print server for the Canon PIXMA MG2500 series.
 //
 // LED: blinking yellow = ready, no printer / solid green = printer attached /
-//      blinking green = printing (test page or AirPrint) / fast red = last
+//      blinking green = printing (test page or AirPrint) or scanning / fast red = last
 //      job failed / blue flashes = Identify-Printer.
 // BOOT button: short press = print an A4 colour test page (dry run without a
-//      printer), hold 2 s while printing = cancel.
-// AirPrint: joins the WiFi from .env and serves IPP on port 631.
+//      printer), hold 2 s while printing or scanning = cancel.
+// AirPrint: joins the WiFi from .env and serves IPP on port 631; the status
+//      and scan pages are at http://<host>/ and http://<host>/scan (port 80).
+// MODE=debug: also the remote log, crash dumps and firmware updates over
+//      WiFi (debug.h, tools/remote.py).
 #include <stdbool.h>
+#include <string.h>
 
 #include "driver/gpio.h"
 #include "esp_log.h"
@@ -14,8 +18,10 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "airprint_esp.h"
+#include "debug.h"
 #include "local_config.h"
 #include "print_job.h"
+#include "scan_service.h"
 #include "sdkconfig.h"
 #include "status_led.h"
 #include "usb_printer.h"
@@ -127,9 +133,30 @@ static void button_task(void *arg)
             if (s_busy || s_airprint_busy) {
                 ESP_LOGW(TAG, "cancel requested");
                 usb_printer_cancel();
+                scan_service_cancel();
             }
         }
     }
+}
+
+static volatile bool s_debug_server_up;
+
+static bool device_busy(void)
+{
+    return usb_printer_job_active();
+}
+
+// a freshly updated firmware is kept once the WiFi (and in debug mode the
+// debug server, the way to fix things) has worked for a while
+static bool healthy(void)
+{
+    return wifi_connected() && (strcmp(MODE, "debug") != 0 || s_debug_server_up);
+}
+
+static void ota_confirm_task(void *arg)
+{
+    debug_ota_confirm(healthy, 20, 180);
+    vTaskDelete(NULL);
 }
 
 #ifdef PRINTSERVER_QEMU_SELFTEST
@@ -139,18 +166,28 @@ void main_unused(void)
     (void)button_task;
     (void)on_printer;
     (void)on_airprint_job;
+    (void)ota_confirm_task;
+    (void)device_busy;
 }
 #else
 void app_main(void)
 {
+    bool debug = strcmp(MODE, "debug") == 0;
+    if (debug)
+        debug_log_start(64 * 1024);
     ESP_ERROR_CHECK(status_led_init());
     status_led_set(LED_WAITING);
     ESP_ERROR_CHECK(usb_printer_start(on_printer));
     xTaskCreate(button_task, "button", 3072, NULL, 5, NULL);
     ESP_LOGI(TAG, "ready: press BOOT to print a test page");
 
+    xTaskCreate(ota_confirm_task, "ota_confirm", 3072, NULL, 2, NULL);
     // AirPrint; the printer keeps working locally if WiFi isn't configured
-    if (wifi_start(HOSTNAME) == ESP_OK && airprint_esp_start(HOSTNAME, on_airprint_job) != ESP_OK)
-        ESP_LOGE(TAG, "AirPrint failed to start");
+    if (wifi_start(HOSTNAME) == ESP_OK) {
+        if (airprint_esp_start(HOSTNAME, on_airprint_job) != ESP_OK)
+            ESP_LOGE(TAG, "AirPrint failed to start");
+        if (debug)
+            s_debug_server_up = debug_server_start(device_busy) == ESP_OK;
+    }
 }
 #endif

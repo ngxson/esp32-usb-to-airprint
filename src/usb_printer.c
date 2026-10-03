@@ -5,7 +5,8 @@
 //   usb_client  - runs usb_host_client_handle_events(); opens/claims/tears
 //                 down the printer and executes all transfer callbacks
 // A print job runs in its own task and talks to the printer through
-// usb_printer_write()/flush()/wait_response().
+// usb_printer_write()/flush()/wait_response(). A scan uses the device's
+// vendor interface through usb_scanner_*(); it holds the device like a job.
 #include "usb_printer.h"
 
 #include <stdatomic.h>
@@ -30,7 +31,11 @@ static const char *TAG = "usb_printer";
 #define IN_POLL_IDLE_MS 2000    // back-channel poll interval; every read returns
 #define IN_POLL_JOB_MS 250      // a fresh ~1 KB status, so don't read back-to-back
 
+#define SCAN_OUT_SIZE 4224      // largest scanner command: gamma table, 16 + 2056 bytes
+#define SCAN_IN_SIZE USB_SCAN_MAX_READ
+
 #define USB_CLASS_PRINTER 0x07
+#define USB_CLASS_VENDOR 0xff
 #define PRN_REQ_GET_DEVICE_ID 0
 #define PRN_REQ_GET_PORT_STATUS 1
 #define PRN_REQ_SOFT_RESET 2
@@ -64,8 +69,17 @@ typedef struct {
     SemaphoreHandle_t ctrl_sem;
     SemaphoreHandle_t ctrl_mutex;
 
+    // scanner interface
+    uint8_t scan_intf, scan_ep_out, scan_ep_in;
+    uint16_t scan_mps;                  // bulk IN max packet size: reads are multiples of it
+    bool scan_claimed;
+    volatile bool scan_active;
+    bool scan_stuck;                    // a transfer never came back: no more scanning
+    usb_transfer_t *scan_out, *scan_in;
+    SemaphoreHandle_t scan_out_sem, scan_in_sem;
+
     // job state
-    volatile bool job_active;
+    volatile bool job_active;           // a print job or a scan holds the device
     volatile bool cancel;
     volatile usb_transfer_status_t out_status;  // first failed OUT status in the job
 
@@ -273,11 +287,26 @@ static void str_desc_ascii(const usb_str_desc_t *d, char *out, size_t out_len)
     out[j] = 0;
 }
 
+static void free_scan_transfers(void)
+{
+    if (s_p.scan_out)
+        usb_host_transfer_free(s_p.scan_out);
+    if (s_p.scan_in)
+        usb_host_transfer_free(s_p.scan_in);
+    s_p.scan_out = s_p.scan_in = NULL;
+}
+
 static void release_device(void)
 {
     if (s_p.claimed)
         usb_host_interface_release(s_p.client, s_p.dev, s_p.intf);
     s_p.claimed = false;
+    if (!s_p.scan_stuck)
+        free_scan_transfers();
+    if (s_p.scan_claimed)
+        usb_host_interface_release(s_p.client, s_p.dev, s_p.scan_intf);
+    s_p.scan_claimed = false;
+    s_p.scan_ep_in = s_p.scan_ep_out = 0;
     for (int i = 0; i < OUT_XFER_COUNT; i++) {
         if (s_p.out[i])
             usb_host_transfer_free(s_p.out[i]);
@@ -348,6 +377,66 @@ static bool find_printer_interface(const usb_config_desc_t *cfg)
     return best_rank >= 0;
 }
 
+// Logs every interface and endpoint (useful when a new device shows up).
+static void log_interfaces(const usb_config_desc_t *cfg)
+{
+    int offset = 0;
+    const usb_standard_desc_t *d = (const usb_standard_desc_t *)cfg;
+    while ((d = usb_parse_next_descriptor(d, cfg->wTotalLength, &offset)) != NULL) {
+        if (d->bDescriptorType == USB_B_DESCRIPTOR_TYPE_INTERFACE) {
+            const usb_intf_desc_t *i = (const usb_intf_desc_t *)d;
+            ESP_LOGI(TAG, "  interface %d alt %d: class %02x/%02x/%02x", i->bInterfaceNumber, i->bAlternateSetting,
+                     i->bInterfaceClass, i->bInterfaceSubClass, i->bInterfaceProtocol);
+        } else if (d->bDescriptorType == USB_B_DESCRIPTOR_TYPE_ENDPOINT) {
+            const usb_ep_desc_t *ep = (const usb_ep_desc_t *)d;
+            static const char *const types[] = {"control", "isoc", "bulk", "interrupt"};
+            ESP_LOGI(TAG, "    endpoint 0x%02x %s, max packet %d", ep->bEndpointAddress,
+                     types[ep->bmAttributes & USB_BM_ATTRIBUTES_XFERTYPE_MASK], ep->wMaxPacketSize & 0x7ff);
+        }
+    }
+}
+
+// The scanner function: a vendor-specific interface with a bulk IN and a
+// bulk OUT endpoint (SANE's pixma backend uses interface 0 of the MG2500).
+static bool find_scanner_interface(const usb_config_desc_t *cfg)
+{
+    int offset = 0;
+    const usb_standard_desc_t *d = (const usb_standard_desc_t *)cfg;
+    bool cand = false, found = false;
+    uint8_t intf = 0, in = 0, out = 0;
+    uint16_t mps = 0;
+    for (;;) {
+        d = usb_parse_next_descriptor(d, cfg->wTotalLength, &offset);
+        if (!d || d->bDescriptorType == USB_B_DESCRIPTOR_TYPE_INTERFACE) {
+            if (cand && in && out && !found) {
+                found = true;
+                s_p.scan_intf = intf;
+                s_p.scan_ep_in = in;
+                s_p.scan_ep_out = out;
+                s_p.scan_mps = mps;
+            }
+            if (!d)
+                break;
+            const usb_intf_desc_t *i = (const usb_intf_desc_t *)d;
+            cand = i->bInterfaceClass == USB_CLASS_VENDOR && i->bAlternateSetting == 0 &&
+                   i->bInterfaceNumber != s_p.intf;
+            intf = i->bInterfaceNumber;
+            in = out = 0;
+        } else if (cand && d->bDescriptorType == USB_B_DESCRIPTOR_TYPE_ENDPOINT) {
+            const usb_ep_desc_t *ep = (const usb_ep_desc_t *)d;
+            if ((ep->bmAttributes & USB_BM_ATTRIBUTES_XFERTYPE_MASK) != USB_BM_ATTRIBUTES_XFER_BULK)
+                continue;
+            if (ep->bEndpointAddress & USB_B_ENDPOINT_ADDRESS_EP_DIR_MASK) {
+                in = ep->bEndpointAddress;
+                mps = ep->wMaxPacketSize & 0x7ff;
+            } else {
+                out = ep->bEndpointAddress;
+            }
+        }
+    }
+    return found && s_p.scan_mps > 0;
+}
+
 static void open_device(uint8_t addr)
 {
     if (s_p.dev) {
@@ -380,6 +469,7 @@ static void open_device(uint8_t addr)
         return;
     }
     info.bidirectional = s_p.ep_in != 0;
+    log_interfaces(cfg);
     ESP_LOGI(TAG, "printer interface %d alt %d, bulk OUT 0x%02x, bulk IN 0x%02x", s_p.intf, s_p.alt, s_p.ep_out,
              s_p.ep_in);
 
@@ -396,6 +486,18 @@ static void open_device(uint8_t addr)
         return;
     }
     s_p.claimed = true;
+    s_p.scan_stuck = false;
+    if (find_scanner_interface(cfg)) {
+        err = usb_host_interface_claim(s_p.client, s_p.dev, s_p.scan_intf, 0);
+        s_p.scan_claimed = err == ESP_OK;
+        if (s_p.scan_claimed)
+            ESP_LOGI(TAG, "scanner interface %d, bulk OUT 0x%02x, bulk IN 0x%02x (max packet %d)", s_p.scan_intf,
+                     s_p.scan_ep_out, s_p.scan_ep_in, s_p.scan_mps);
+        else
+            ESP_LOGW(TAG, "cannot claim scanner interface %d: %s", s_p.scan_intf, esp_err_to_name(err));
+    } else {
+        ESP_LOGI(TAG, "no scanner interface");
+    }
     s_p.ctrl->callback = ctrl_cb;
     for (int i = 0; i < OUT_XFER_COUNT; i++) {
         s_p.out[i]->device_handle = s_p.dev;
@@ -484,7 +586,7 @@ static void client_task(void *arg)
             s_p.pending_addr = 0;
             open_device(addr);
         }
-        if (s_p.connected && !s_p.gone && !s_p.in_inflight &&
+        if (s_p.connected && !s_p.gone && !s_p.in_inflight && !s_p.scan_active &&
             xTaskGetTickCount() - s_p.in_last >= pdMS_TO_TICKS(s_p.job_active ? IN_POLL_JOB_MS : IN_POLL_IDLE_MS))
             in_submit();
         if (s_p.gone && !teardown) {
@@ -532,7 +634,9 @@ esp_err_t usb_printer_start(usb_printer_conn_cb_t cb)
     s_p.ctrl_mutex = xSemaphoreCreateMutex();
     s_p.ctrl_sem = xSemaphoreCreateBinary();
     s_p.out_free = xQueueCreate(OUT_XFER_COUNT, sizeof(usb_transfer_t *));
-    if (!s_p.lock || !s_p.ctrl_mutex || !s_p.ctrl_sem || !s_p.out_free)
+    s_p.scan_out_sem = xSemaphoreCreateBinary();
+    s_p.scan_in_sem = xSemaphoreCreateBinary();
+    if (!s_p.lock || !s_p.ctrl_mutex || !s_p.ctrl_sem || !s_p.out_free || !s_p.scan_out_sem || !s_p.scan_in_sem)
         return ESP_ERR_NO_MEM;
 
     const usb_host_config_t host_cfg = {.skip_phy_setup = false, .intr_flags = ESP_INTR_FLAG_LEVEL1};
@@ -582,17 +686,29 @@ bool usb_printer_get_info(usb_printer_info_t *out)
     return true;
 }
 
+// Claims the device for a print job or a scan.
+static bool claim_device(void)
+{
+    xSemaphoreTake(s_p.lock, portMAX_DELAY);
+    bool ok = !s_p.job_active;
+    s_p.job_active = true;
+    xSemaphoreGive(s_p.lock);
+    return ok;
+}
+
 esp_err_t usb_printer_job_begin(void)
 {
     if (!usb_printer_connected())
         return ESP_ERR_INVALID_STATE;
-    if (s_p.job_active)
+    if (!claim_device())
         return ESP_ERR_INVALID_STATE;
     // transfers cancelled by a previous job may still be returning
     for (int i = 0; i < 100 && uxQueueMessagesWaiting(s_p.out_free) < OUT_XFER_COUNT; i++)
         vTaskDelay(pdMS_TO_TICKS(10));
-    if (uxQueueMessagesWaiting(s_p.out_free) < OUT_XFER_COUNT)
+    if (uxQueueMessagesWaiting(s_p.out_free) < OUT_XFER_COUNT) {
+        s_p.job_active = false;
         return ESP_ERR_INVALID_STATE;
+    }
     s_p.cancel = false;
     s_p.out_status = USB_TRANSFER_STATUS_COMPLETED;
     s_p.fill = NULL;
@@ -744,4 +860,113 @@ esp_err_t usb_printer_port_status(uint8_t *status)
     size_t got = 0;
     esp_err_t err = ctrl_request(req, PRN_REQ_GET_PORT_STATUS, 0, s_p.intf, 1, status, &got);
     return (err == ESP_OK && got != 1) ? ESP_FAIL : err;
+}
+
+// ---------------------------------------------------------------------------
+// scanner
+
+static void scan_cb(usb_transfer_t *xfer)
+{
+    xSemaphoreGive((SemaphoreHandle_t)xfer->context);
+}
+
+bool usb_scanner_present(void)
+{
+    return usb_printer_connected() && s_p.scan_claimed && !s_p.scan_stuck;
+}
+
+bool usb_scanner_active(void)
+{
+    return s_p.scan_active;
+}
+
+esp_err_t usb_scanner_begin(void)
+{
+    if (!usb_scanner_present())
+        return ESP_ERR_NOT_FOUND;
+    if (!claim_device())
+        return ESP_ERR_INVALID_STATE;
+    esp_err_t err = usb_host_transfer_alloc(SCAN_OUT_SIZE, 0, &s_p.scan_out);
+    if (err == ESP_OK)
+        err = usb_host_transfer_alloc(SCAN_IN_SIZE, 0, &s_p.scan_in);
+    if (err != ESP_OK) {
+        free_scan_transfers();
+        s_p.job_active = false;
+        return err;
+    }
+    s_p.scan_out->device_handle = s_p.scan_in->device_handle = s_p.dev;
+    s_p.scan_out->bEndpointAddress = s_p.scan_ep_out;
+    s_p.scan_in->bEndpointAddress = s_p.scan_ep_in;
+    s_p.scan_out->callback = s_p.scan_in->callback = scan_cb;
+    s_p.scan_out->context = s_p.scan_out_sem;
+    s_p.scan_in->context = s_p.scan_in_sem;
+    s_p.scan_active = true;
+    return ESP_OK;
+}
+
+// Runs one transfer; bytes transferred or USB_SCAN_TIMEOUT / USB_SCAN_ERROR.
+static int scan_xfer(usb_transfer_t *x, size_t num_bytes, uint32_t timeout_ms)
+{
+    if (!s_p.scan_active || s_p.gone || s_p.scan_stuck)
+        return USB_SCAN_ERROR;
+    SemaphoreHandle_t sem = x->context;
+    xSemaphoreTake(sem, 0);
+    x->num_bytes = (int)num_bytes;
+    if (usb_host_transfer_submit(x) != ESP_OK)
+        return USB_SCAN_ERROR;
+    bool timed_out = xSemaphoreTake(sem, pdMS_TO_TICKS(timeout_ms)) != pdTRUE;
+    if (timed_out) {
+        // stop it: the callback still comes, with a cancelled status
+        abort_endpoint(x->bEndpointAddress);
+        if (xSemaphoreTake(sem, pdMS_TO_TICKS(1000)) != pdTRUE) {
+            ESP_LOGE(TAG, "scanner transfer on 0x%02x did not come back", x->bEndpointAddress);
+            s_p.scan_stuck = true;
+            return USB_SCAN_ERROR;
+        }
+    }
+    if (x->status == USB_TRANSFER_STATUS_COMPLETED)
+        return x->actual_num_bytes;     // also when it completed just as it timed out
+    if (timed_out)
+        return USB_SCAN_TIMEOUT;
+    ESP_LOGW(TAG, "scanner transfer on 0x%02x failed, status %d", x->bEndpointAddress, x->status);
+    return USB_SCAN_ERROR;
+}
+
+int usb_scanner_write(const uint8_t *data, size_t len, uint32_t timeout_ms)
+{
+    if (len > SCAN_OUT_SIZE || !s_p.scan_out)
+        return USB_SCAN_ERROR;
+    memcpy(s_p.scan_out->data_buffer, data, len);
+    return scan_xfer(s_p.scan_out, len, timeout_ms);
+}
+
+int usb_scanner_read(uint8_t *buf, size_t len, uint32_t timeout_ms)
+{
+    if (!s_p.scan_in)
+        return USB_SCAN_ERROR;
+    if (len > SCAN_IN_SIZE)
+        len = SCAN_IN_SIZE;
+    // IN transfers must be a multiple of the max packet size
+    size_t n = (len + s_p.scan_mps - 1) / s_p.scan_mps * s_p.scan_mps;
+    if (n > SCAN_IN_SIZE)
+        n = SCAN_IN_SIZE / s_p.scan_mps * s_p.scan_mps;
+    int r = scan_xfer(s_p.scan_in, n, timeout_ms);
+    if (r > (int)len) {
+        ESP_LOGW(TAG, "scanner sent %d bytes, %u expected: rest dropped", r, (unsigned)len);
+        r = (int)len;
+    }
+    if (r > 0)
+        memcpy(buf, s_p.scan_in->data_buffer, (size_t)r);
+    return r;
+}
+
+void usb_scanner_end(void)
+{
+    if (!s_p.scan_active)
+        return;
+    s_p.scan_active = false;
+    if (!s_p.scan_stuck)
+        free_scan_transfers();
+    s_p.in_last = xTaskGetTickCount();     // resume the printer's status polling later
+    s_p.job_active = false;
 }

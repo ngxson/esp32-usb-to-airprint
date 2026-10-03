@@ -1,7 +1,10 @@
 // Runs the AirPrint server on the development machine for testing with
 // ipptool / CUPS. Each job's printer stream is written to out/job-<n>.prn.
+// Scanning (http://localhost:<port>/scan) uses the emulated scanner.
 //
 //   ./airprint_host [port]          (default 8631)
+//   FAKE_SCANNER_KBPS=800           emulated USB rate (0: no delays)
+//   SCAN_BUF_KB=7680                size of the shared buffer (the ESP32's PSRAM)
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -9,6 +12,9 @@
 #include <unistd.h>
 
 #include "airprint.h"
+#include "fake_scanner.h"
+#include "scan_service.h"
+#include "shared_buf.h"
 
 static FILE *s_out;
 static int s_job;
@@ -28,6 +34,8 @@ static void get_status(void *ctx, airprint_status_t *st)
 
 static int job_open(void *ctx)
 {
+    if (scan_service_active())
+        return -1;      // the device is scanning
     char path[64];
     snprintf(path, sizeof(path), "out/job-%d.prn", ++s_job);
     s_out = fopen(path, "wb");
@@ -62,6 +70,28 @@ static void identify(void *ctx)
     fprintf(stderr, "host: identify (LED would blink)\n");
 }
 
+// --- emulated scanner
+static fake_scanner_t s_scanner;
+
+static int scan_open(void *ctx)
+{
+    if (s_out)
+        return -1;      // printing
+    fprintf(stderr, "host: scanner opened\n");
+    return 0;
+}
+
+static void scan_close(void *ctx)
+{
+    fprintf(stderr, "host: scanner closed (%d protocol violations%s%s)\n", s_scanner.errors,
+            s_scanner.errors ? ", first: " : "", s_scanner.error);
+}
+
+static bool http_handler(void *ctx, airprint_http_t *h, const char *method, const char *path)
+{
+    return scan_service_http(h, method, path);
+}
+
 int main(int argc, char **argv)
 {
     signal(SIGPIPE, SIG_IGN);
@@ -77,11 +107,22 @@ int main(int argc, char **argv)
         .job_sync = job_sync,
         .job_close = job_close,
         .identify = identify,
+        .http_handler = http_handler,
+        .home_html = SCAN_HOME_HTML,
     };
     if (argc > 1)
         cfg.port = atoi(argv[1]);
     if (getenv("AIRPRINT_HOST_SLOW_US"))
         s_slow_us = atoi(getenv("AIRPRINT_HOST_SLOW_US"));
+    unsigned kbps = getenv("FAKE_SCANNER_KBPS") ? (unsigned)atoi(getenv("FAKE_SCANNER_KBPS")) : 800;
+    size_t buf_kb = getenv("SCAN_BUF_KB") ? (size_t)atoi(getenv("SCAN_BUF_KB")) : 7680;
+    if (fake_scanner_init(&s_scanner, kbps * 1024) != 0)
+        return 1;
+    sbuf_init(malloc(buf_kb * 1024), buf_kb * 1024);
+    static scan_config_t scfg = {.open = scan_open, .close = scan_close};
+    scfg.io = fake_scanner_io(&s_scanner);
+    scan_service_init(&scfg);
+    fprintf(stderr, "host: scanner emulated at %u KB/s, %u KB buffer\n", kbps, (unsigned)buf_kb);
     if (airprint_start(&cfg) != 0)
         return 1;
     for (;;)

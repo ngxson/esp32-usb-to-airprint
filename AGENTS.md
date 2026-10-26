@@ -1,55 +1,24 @@
 # AGENTS.md: technical notes for working on this project
 
-User-facing setup is in README.md. This file is the technical record: how
-the firmware works, what was observed on the real hardware, how everything
-is verified, and what to watch out for.
+User-facing setup is in README.md. This file is the technical record: how the firmware works, what was observed on the real hardware, how everything is verified, and what to watch out for.
 
 ## Working rules
 
-- **Verify before touching hardware.** Every change goes through the host
-  tests (`tools/run_tests.sh`, with `GUTENPRINT=1 AIRPRINT=1` for printing,
-  IPP, scanning or HTTP changes, `WEB=1` for the web UI) and, when firmware
-  behaviour changes, the QEMU self test (`tools/qemu_selftest.sh`).
-- **Flash only with the user's go-ahead.** That includes OTA updates
-  (`pio run -t ota`, `tools/remote.py upload`), reboots and the `panic`
-  test. Reading `/info`, the remote log, the status pages and the serial log
-  of a running board is fine. A real scan is harmless but scans whatever is
-  on the glass: the user's documents are private, so don't describe them and
-  don't keep copies.
-- **Never read or print the secrets** in `.env` or the generated
-  `src/local_config.h`. To check whether a key is set, test for a non-empty
-  value without printing it, e.g. `grep -qE '^WIFI_SSID=.+' .env`. Reading a
-  non-secret key (`HOSTNAME`, `MODE`) is fine.
-- **Keep the core portable.** `components/canon_bjl`, `components/airprint`
-  and `components/scanner` build both natively (`host/`) and for the ESP32.
-  Platform specifics go behind hooks or `#ifdef ESP_PLATFORM`.
-- **Optimisations must not change output.** Pure speed changes must keep the
-  reference CRCs below unchanged.
-- **Don't edit a script while it runs.** bash reads scripts as it goes; an
-  edit during `qemu_selftest.sh` broke a run with a syntax error.
+- **Verify before touching hardware.** Every change goes through the host tests (`tools/run_tests.sh`, with `GUTENPRINT=1 AIRPRINT=1` for printing, IPP, scanning or HTTP changes, `WEB=1` for the web UI) and, when firmware behaviour changes, the QEMU self test (`tools/qemu_selftest.sh`).
+- **Flash only with the user's go-ahead.** That includes OTA updates (`pio run -t ota`, `tools/remote.py upload`), reboots and the `panic` test. Reading `/info`, the remote log, the status pages and the serial log of a running board is fine. A real scan is harmless but scans whatever is on the glass: the user's documents are private, so don't describe them and don't keep copies.
+- **Never read or print the secrets** in `.env` or the generated `src/local_config.h`. To check whether a key is set, test for a non-empty value without printing it, e.g. `grep -qE '^WIFI_SSID=.+' .env`. Reading a non-secret key (`HOSTNAME`, `MODE`) is fine.
+- **Keep the core portable.** `components/canon_bjl`, `components/airprint` and `components/scanner` build both natively (`host/`) and for the ESP32. Platform specifics go behind hooks or `#ifdef ESP_PLATFORM`.
+- **Optimisations must not change output.** Pure speed changes must keep the reference CRCs below unchanged.
+- **Don't edit a script while it runs.** bash reads scripts as it goes; an edit during `qemu_selftest.sh` broke a run with a syntax error.
 
 ## Current state of the hardware (2026-10-07)
 
-- The board sits at the printer, plugged into its USB port, with no USB
-  cable to a computer. Everything is remote: `tools/remote.py`,
-  `pio run -t ota`, `pio run -t logs`.
-- `.env` has `MODE=debug`, `HOSTNAME=canon-mg2500`, `PRINTER_NAME=canon-mg2500`.
-  The board is at <board-ip>.
-  `canon-mg2500.local` takes about 5 s to resolve from the Mac (the firmware
-  is IPv4-only and macOS also waits for an IPv6 address); the IP answers at
-  once, so `remote.py --host <board-ip>` is quicker.
-- Flashed over USB once with the rollback bootloader and the partition table
-  with the `coredump` partition; since then updated over OTA (eSCL build on
-  `ota_1`, confirmed).
-- Working on the real hardware: printing (AirPrint from iOS), scanning from
-  the web page (kept and streamed), eSCL from macOS Image Capture, remote
-  log, OTA with confirmation.
-- Not yet on the board: the Svelte web UI, the event stream and the button
-  scan (tested on the host, in headless Chrome and in QEMU).
-- 2026-10-07: an I2C OLED wired to SCL GPIO41 / SDA GPIO42; the screen
-  build went on over OTA (`ota_1`, confirmed) and finds the display at
-  0x3C. Whether the picture is right (SSD1306 vs SH1106) is still to be
-  checked by eye.
+- The board sits at the printer, plugged into its USB port, with no USB cable to a computer. Everything is remote: `tools/remote.py`, `pio run -t ota`, `pio run -t logs`.
+- `.env` has `MODE=debug`, `HOSTNAME=canon-mg2500`, `PRINTER_NAME=canon-mg2500`. The board is at <board-ip>. `canon-mg2500.local` takes about 5 s to resolve from the Mac (the firmware is IPv4-only and macOS also waits for an IPv6 address); the IP answers at once, so `remote.py --host <board-ip>` is quicker.
+- Flashed over USB once with the rollback bootloader and the partition table with the `coredump` partition; since then updated over OTA (eSCL build on `ota_1`, confirmed).
+- Working on the real hardware: printing (AirPrint from iOS), scanning from the web page (kept and streamed), eSCL from macOS Image Capture, remote log, OTA with confirmation.
+- Not yet on the board: the Svelte web UI, the event stream and the button scan (tested on the host, in headless Chrome and in QEMU).
+- 2026-10-07: an I2C OLED wired to SCL GPIO41 / SDA GPIO42; the screen build went on over OTA (`ota_1`, confirmed) and finds the display at 0x3C. Whether the picture is right (SSD1306 vs SH1106) is still to be checked by eye.
 
 ## Layout
 
@@ -128,26 +97,13 @@ partitions.csv          nvs, otadata, phy_init, ota_0, ota_1 (4 MB each), coredu
 
 ## Configuration
 
-- `.env.example` (committed) lists every key with its default. `.env`
-  (git-ignored) overrides them, and is created from the example on the first
-  build. Every key becomes `#define KEY "value"` in `src/local_config.h`.
-  Keys: `WIFI_SSID`, `WIFI_PASSWORD`, `PRINTER_NAME`, `HOSTNAME`, `MODE`.
+- `.env.example` (committed) lists every key with its default. `.env` (git-ignored) overrides them, and is created from the example on the first build. Every key becomes `#define KEY "value"` in `src/local_config.h`. Keys: `WIFI_SSID`, `WIFI_PASSWORD`, `PRINTER_NAME`, `HOSTNAME`, `MODE`.
 - `MODE`:
   - `normal`: printing and scanning.
-  - `debug`: `normal` plus remote access (log, core dumps, OTA; see Debug
-    mode). What the board runs now.
-  - `dev`: fake printer (jobs converted and captured, nothing printed) and the
-    emulated scanner (scans of the test page at about USB speed).
-- `sdkconfig.defaults` holds all ESP-IDF settings; the qemu env adds
-  `sdkconfig.defaults.qemu` through `board_build.cmake_extra_args`. The
-  generated `sdkconfig.<env>` is git-ignored; delete it to pick up changed
-  defaults. Notable settings: `-O2`, 32 KB I-cache / 64 KB D-cache, QIO
-  flash, octal PSRAM (`SPIRAM_MALLOC_ALWAYSINTERNAL=16384`: allocations up to
-  16 KB stay internal), `LWIP_MAX_SOCKETS=28`, rollback bootloader, ELF core
-  dump to flash, FreeRTOS trace facility (task list in `/info`).
-- `PROJECT_VER` is set in `CMakeLists.txt`, because ESP-IDF's `git describe`
-  fails in a repository without commits. The project name is
-  `usb_host_probe` (OTA uploads must match it).
+  - `debug`: `normal` plus remote access (log, core dumps, OTA; see Debug mode). What the board runs now.
+  - `dev`: fake printer (jobs converted and captured, nothing printed) and the emulated scanner (scans of the test page at about USB speed).
+- `sdkconfig.defaults` holds all ESP-IDF settings; the qemu env adds `sdkconfig.defaults.qemu` through `board_build.cmake_extra_args`. The generated `sdkconfig.<env>` is git-ignored; delete it to pick up changed defaults. Notable settings: `-O2`, 32 KB I-cache / 64 KB D-cache, QIO flash, octal PSRAM (`SPIRAM_MALLOC_ALWAYSINTERNAL=16384`: allocations up to 16 KB stay internal), `LWIP_MAX_SOCKETS=28`, rollback bootloader, ELF core dump to flash, FreeRTOS trace facility (task list in `/info`).
+- `PROJECT_VER` is set in `CMakeLists.txt`, because ESP-IDF's `git describe` fails in a repository without commits. The project name is `usb_host_probe` (OTA uploads must match it).
 
 ## Build and test
 
@@ -165,86 +121,26 @@ cd web && npm run dev               # the web UI with live reload, against host/
 cd web && npm run check             # svelte-check (types)
 ```
 
-The npm registry configured on this Mac does not answer; install with
-`npm install --registry=https://registry.npmjs.org/`. `typescript` stays at
-6.x: `svelte-check` 4.7 refuses 7.
+The npm registry configured on this Mac does not answer; install with `npm install --registry=https://registry.npmjs.org/`. `typescript` stays at 6.x: `svelte-check` 4.7 refuses 7.
 
 What the host tests cover:
-- `bjl_host selftest`: encoder unit tests; test page streams decoded by
-  `bjl_decode.py`.
-- `scan_host selftest`: the pixma protocol against `fake_scanner` at 75-600
-  dpi and odd areas (x not a multiple of 32, a 6 px strip at the right edge),
-  busy retries, a consumer stopping the scan, a cancel during warm-up, a
-  scanner error mid-image, invalid parameters. Every delivered line is
-  compared pixel by pixel with the test page; the fake flags any protocol
-  violation, unread reply or unclosed session. JPEG encoder: odd sizes,
-  padding, early finish.
-- `scan_host scan`: whole pipeline to JPEG for A4/Letter at 150-600 dpi,
-  checked by `check_jpeg.py` (djpeg strict decode, size, dpi, PSNR >= 38 dB).
-- `oled_host`: pixel layout, glyphs, scaling, clipping, UTF-8; then every
-  screen (booting, no printer, ready, ink low, no paper, printing, printed,
-  test page, scanning, scanned, failed, no WiFi) into `host/out/oled.png`.
-  Look at it after any layout change.
-- Web unit tests (`web/tests/*.test.ts`, run by node's type stripping, so
-  `src/lib` files they import must stay plain TypeScript: no parameter
-  properties, no extension-less imports): URF round trips (colour, gray,
-  every packet kind, > 256 equal lines) against a decoder written from the
-  format description, plus `raster_to_png.py` on the same output; the PDF
-  writer (xref offsets, read back by pdf.js); layout (paper pixels equal
-  canon_bjl's, rotations, fit inside the printable area); IPP encoding, JFIF
-  dpi, auto-crop.
-- `AIRPRINT=1`: ipptool IPP 1.1/2.0/Everywhere, printing URF/PWG documents
-  rendered by macOS's own filters, cancel while printing; scanning over HTTP
-  (stream through a 64 KB ring identical to the direct scan, a kept scan
-  that does not fit, busy, client leaving mid-scan, cancel); an eSCL session
-  (capabilities XML, a 5 x 4 in region compared with the test page crop,
-  one page per job, job state, cancel of a queued job, feeder refused); the
-  web UI's files (gzip, 304), a button scan (SIGUSR1) read while it is
-  scanned and identical to the direct scan, its progress on `/events`; the
-  status screen drawn from the live state (`/dev/oled.pbm`) while printing,
-  after the cancel, while scanning and after the scan (`oled-live-*` in
-  `oled.png`).
-- `WEB=1` (`web/tests/e2e.mjs`, playwright-core driving the installed Chrome):
-  upload a PDF and a photo, print 2 pages at 300 dpi and the photo at 600
-  dpi (the jobs are decoded by `bjl_decode.py`), scan from the page, a button
-  scan that a second browser shows live and saves (and two tabs of one
-  browser save once), Process (rotate, ID card from a file, PDF export,
-  viewer), the phone layout. Screenshots in `host/out/ui-*.png`; no page
-  errors allowed. The CUPS sample files are gzipped on disk (ipptool unpacks
-  them): the test unpacks them first.
+- `bjl_host selftest`: encoder unit tests; test page streams decoded by `bjl_decode.py`.
+- `scan_host selftest`: the pixma protocol against `fake_scanner` at 75-600 dpi and odd areas (x not a multiple of 32, a 6 px strip at the right edge), busy retries, a consumer stopping the scan, a cancel during warm-up, a scanner error mid-image, invalid parameters. Every delivered line is compared pixel by pixel with the test page; the fake flags any protocol violation, unread reply or unclosed session. JPEG encoder: odd sizes, padding, early finish.
+- `scan_host scan`: whole pipeline to JPEG for A4/Letter at 150-600 dpi, checked by `check_jpeg.py` (djpeg strict decode, size, dpi, PSNR >= 38 dB).
+- `oled_host`: pixel layout, glyphs, scaling, clipping, UTF-8; then every screen (booting, no printer, ready, ink low, no paper, printing, printed, test page, scanning, scanned, failed, no WiFi) into `host/out/oled.png`. Look at it after any layout change.
+- Web unit tests (`web/tests/*.test.ts`, run by node's type stripping, so `src/lib` files they import must stay plain TypeScript: no parameter properties, no extension-less imports): URF round trips (colour, gray, every packet kind, > 256 equal lines) against a decoder written from the format description, plus `raster_to_png.py` on the same output; the PDF writer (xref offsets, read back by pdf.js); layout (paper pixels equal canon_bjl's, rotations, fit inside the printable area); IPP encoding, JFIF dpi, auto-crop.
+- `AIRPRINT=1`: ipptool IPP 1.1/2.0/Everywhere, printing URF/PWG documents rendered by macOS's own filters, cancel while printing; scanning over HTTP (stream through a 64 KB ring identical to the direct scan, a kept scan that does not fit, busy, client leaving mid-scan, cancel); an eSCL session (capabilities XML, a 5 x 4 in region compared with the test page crop, one page per job, job state, cancel of a queued job, feeder refused); the web UI's files (gzip, 304), a button scan (SIGUSR1) read while it is scanned and identical to the direct scan, its progress on `/events`; the status screen drawn from the live state (`/dev/oled.pbm`) while printing, after the cancel, while scanning and after the scan (`oled-live-*` in `oled.png`).
+- `WEB=1` (`web/tests/e2e.mjs`, playwright-core driving the installed Chrome): upload a PDF and a photo, print 2 pages at 300 dpi and the photo at 600 dpi (the jobs are decoded by `bjl_decode.py`), scan from the page, a button scan that a second browser shows live and saves (and two tabs of one browser save once), Process (rotate, ID card from a file, PDF export, viewer), the phone layout. Screenshots in `host/out/ui-*.png`; no page errors allowed. The CUPS sample files are gzipped on disk (ipptool unpacks them): the test unpacks them first.
 
 What the QEMU self test covers (about 10 minutes):
-- dry-run test pages (CRCs), IPP conformance, URF prints whose CRCs must match
-  the host build; the web UI on port 80 (page, gzip asset, 304, `/scan`
-  redirect), `/api/state` and the first `/events` event;
-- scans through the emulated scanner: streamed 150 dpi A4 and 300 dpi Letter
-  (ring wraps) byte-identical to the host build; a kept scan refused cleanly;
-- debug server: `/info`, `/log`, the live log; OTA: a non-image and a
-  truncated image refused, an update rebooted before it confirmed itself
-  rolled back by the bootloader, an update through `remote.py upload`
-  confirmed; a deliberate crash: reset reason, crash summary in the log,
-  core dump decoded by `remote.py crash` (finds `panic_cb`), erased;
-- no display on the emulated I2C bus: reported, screen disabled, no `oled`
-  task in `/info`.
+- dry-run test pages (CRCs), IPP conformance, URF prints whose CRCs must match the host build; the web UI on port 80 (page, gzip asset, 304, `/scan` redirect), `/api/state` and the first `/events` event;
+- scans through the emulated scanner: streamed 150 dpi A4 and 300 dpi Letter (ring wraps) byte-identical to the host build; a kept scan refused cleanly;
+- debug server: `/info`, `/log`, the live log; OTA: a non-image and a truncated image refused, an update rebooted before it confirmed itself rolled back by the bootloader, an update through `remote.py upload` confirmed; a deliberate crash: reset reason, crash summary in the log, core dump decoded by `remote.py crash` (finds `panic_cb`), erased;
+- no display on the emulated I2C bus: reported, screen disabled, no `oled` task in `/info`.
 
-QEMU setup: builds are at https://github.com/espressif/qemu/releases
-(`esp-develop-9.2.2-20260417`, `qemu-xtensa-softmmu-...-aarch64-apple-darwin`).
-That build only needs `/opt/homebrew/lib` (pixman, libgcrypt, SDL2); older
-builds also needed Homebrew's `libslirp` (`brew fetch libslirp`, unpack, add
-its lib dir to `QEMU_LIB_PATH`). macOS strips `DYLD_*` variables before they
-reach scripts, so the script sets them itself. Host ports forwarded: 18631
-(IPP), 18000 (web), 18080 (debug), 12323 (log). A QEMU left running by an
-aborted run keeps those ports: kill it before the next run.
+QEMU setup: builds are at https://github.com/espressif/qemu/releases (`esp-develop-9.2.2-20260417`, `qemu-xtensa-softmmu-...-aarch64-apple-darwin`). That build only needs `/opt/homebrew/lib` (pixman, libgcrypt, SDL2); older builds also needed Homebrew's `libslirp` (`brew fetch libslirp`, unpack, add its lib dir to `QEMU_LIB_PATH`). macOS strips `DYLD_*` variables before they reach scripts, so the script sets them itself. Host ports forwarded: 18631 (IPP), 18000 (web), 18080 (debug), 12323 (log). A QEMU left running by an aborted run keeps those ports: kill it before the next run.
 
-To try things on the Mac: `cd host && ./airprint_host` (port 8631), then
-http://localhost:8631/ (the web UI) or the eSCL endpoints;
-`pkill -USR1 airprint_host` presses the button. `FAKE_SCANNER_KBPS` (0: no
-delays, default 800) and `SCAN_BUF_KB` (default 7680) vary the emulated USB
-rate and the buffer size. To try macOS Image Capture against it, announce it:
-`dns-sd -R "MG2500 Test Scanner" _uscan._tcp local 8631 txtvers=1 vers=2.0
-rs=eSCL "ty=Canon MG2500 series" pdl=image/jpeg cs=color is=platen duplex=F
-UUID=<uuid> adminurl=... representation=...` (use a name that cannot be
-mistaken for the real printer).
+To try things on the Mac: `cd host && ./airprint_host` (port 8631), then http://localhost:8631/ (the web UI) or the eSCL endpoints; `pkill -USR1 airprint_host` presses the button. `FAKE_SCANNER_KBPS` (0: no delays, default 800) and `SCAN_BUF_KB` (default 7680) vary the emulated USB rate and the buffer size. To try macOS Image Capture against it, announce it: `dns-sd -R "MG2500 Test Scanner" _uscan._tcp local 8631 txtvers=1 vers=2.0 rs=eSCL "ty=Canon MG2500 series" pdl=image/jpeg cs=color is=platen duplex=F UUID=<uuid> adminurl=... representation=...` (use a name that cannot be mistaken for the real printer).
 
 Reference CRC-32s (any change to these must be intentional):
 
@@ -256,8 +152,7 @@ Reference CRC-32s (any change to these must be intentional):
 | macOS `onepage-a4.pdf` -> URF 600 dpi | `fa541aca` |
 | macOS `onepage-a4.pdf` -> URF 300 dpi | `537df0da` |
 
-Emulated scanner JPEGs (quality 85, test page): 150 dpi A4 158071 bytes,
-300 dpi A4 376798, 300 dpi Letter 367685.
+Emulated scanner JPEGs (quality 85, test page): 150 dpi A4 158071 bytes, 300 dpi A4 376798, 300 dpi Letter 367685.
 
 ## The MG2500 on USB (observed)
 
@@ -272,530 +167,163 @@ IEEE 1284 ID: MFG:Canon;CMD:BJL,BJRaster3,BSCCe,IVEC,IVECPLI;MDL:MG2500 series;
 port status 0x18 (selected, no error)
 ```
 
-- The ESP32-S3 USB OTG port is full-speed only (12 Mbit/s, 64-byte bulk
-  packets); the MG2500 falls back to it.
-- `usb_printer.c` claims both interfaces at attach and logs the descriptors.
-  One client, one device; print jobs and scans share the `job_active` claim
-  (`claim_device()`), so they exclude each other. The printer's status
-  polling pauses during a scan (`scan_active`).
-- USB-OTG VBUS: a spec-compliant printer only appears on the bus when 5 V is
-  on VBUS, so the board's USB-OTG pads must be bridged.
+- The ESP32-S3 USB OTG port is full-speed only (12 Mbit/s, 64-byte bulk packets); the MG2500 falls back to it.
+- `usb_printer.c` claims both interfaces at attach and logs the descriptors. One client, one device; print jobs and scans share the `job_active` claim (`claim_device()`), so they exclude each other. The printer's status polling pauses during a scan (`scan_active`).
+- USB-OTG VBUS: a spec-compliant printer only appears on the bus when 5 V is on VBUS, so the board's USB-OTG pads must be bridged.
 
 ## Printer protocol (MG2500 series)
 
-- No page description language: Canon BJ raster commands wrapped in IVEC
-  XML. Sources: Gutenprint 5.3.5 `print-canon.c` (the MG2500 series is the
-  "PIXMA MG2400" model there, model 8002400) and Canon's cnijfilter 4.00
-  (model 423), which uses the same IVEC operations.
-- Job: `StartJob` XML, `ModeShift` XML. Then per page: `ESC [K` reset (first
-  page only), page setup (`ESC (b (q (d (t (c (p (P (T (l (v`), multiraster
-  mode (`ESC (I`, `(J` 8 lines per block, `(L` "CMYK"), and `ESC (F` blocks
-  of PackBits lines, each line terminated by `0x80`, one block per ink per 8
-  lines. A page ends with FF and `ESC (b 0`. The job ends with `ESC @` and
-  the `EndJob` XML.
+- No page description language: Canon BJ raster commands wrapped in IVEC XML. Sources: Gutenprint 5.3.5 `print-canon.c` (the MG2500 series is the "PIXMA MG2400" model there, model 8002400) and Canon's cnijfilter 4.00 (model 423), which uses the same IVEC operations.
+- Job: `StartJob` XML, `ModeShift` XML. Then per page: `ESC [K` reset (first page only), page setup (`ESC (b (q (d (t (c (p (P (T (l (v`), multiraster mode (`ESC (I`, `(J` 8 lines per block, `(L` "CMYK"), and `ESC (F` blocks of PackBits lines, each line terminated by `0x80`, one block per ink per 8 lines. A page ends with FF and `ESC (b 0`. The job ends with `ESC @` and the `EndJob` XML.
 - Modes (Gutenprint's MG2400 table):
   - `600x600dpi`: C/M 2 bits per pixel with 3 levels, Y/K 1 bit
   - `300x300dpi`: CMYK all 1 bit
-- Paper: A4 (`ESC (P` size `0x03`, 4961×7016 in 1/600") and Letter (`0x0d`,
-  5100×6600). Borders are 10/10/9/15 pt (left/right/top/bottom).
-- Our streams are byte-identical to Gutenprint's, except Gutenprint drops a
-  page's last 8 lines when the height is a multiple of 8
-  (`canon_write_multiraster` never flushes that block).
-- Back channel: when read, the printer answers with about 1 KB of
-  `GetStatusResponse` XML (status, `status_detail` such as
-  `MarkerSupplyAttention`, Canon fields such as `CIR:CL=000,BK=UK` for ink),
-  e.g. `idle (MarkerSupplyAttention) BST:04;...;CTK:CL,LOW,/,BK,SETZ;
-  CIR:CL=000,BK=UK;...`. Poll it at most every 2 s when idle and every
-  250 ms during a job, and reassemble replies from the 512-byte reads. Like
-  Canon's driver, we wait up to 5 s for the `StartJob`/`ModeShift` replies
-  and up to 180 s for `EndJob` (the page is done), and carry on if a reply
-  never comes.
-- Cancel: stop at a line boundary, finish the page (eject) and end the job.
-  If the printer stops accepting data, after 8 s abort the transfer and send
-  the printer-class SOFT_RESET.
+- Paper: A4 (`ESC (P` size `0x03`, 4961×7016 in 1/600") and Letter (`0x0d`, 5100×6600). Borders are 10/10/9/15 pt (left/right/top/bottom).
+- Our streams are byte-identical to Gutenprint's, except Gutenprint drops a page's last 8 lines when the height is a multiple of 8 (`canon_write_multiraster` never flushes that block).
+- Back channel: when read, the printer answers with about 1 KB of `GetStatusResponse` XML (status, `status_detail` such as `MarkerSupplyAttention`, Canon fields such as `CIR:CL=000,BK=UK` for ink), e.g. `idle (MarkerSupplyAttention) BST:04;...;CTK:CL,LOW,/,BK,SETZ; CIR:CL=000,BK=UK;...`. Poll it at most every 2 s when idle and every 250 ms during a job, and reassemble replies from the 512-byte reads. Like Canon's driver, we wait up to 5 s for the `StartJob`/`ModeShift` replies and up to 180 s for `EndJob` (the page is done), and carry on if a reply never comes.
+- Cancel: stop at a line boundary, finish the page (eject) and end the job. If the printer stops accepting data, after 8 s abort the transfer and send the printer-class SOFT_RESET.
 
 ## Scanner protocol (MG2500 series)
 
 Verified on the real scanner (2026-10-03): the first scan worked unchanged.
 
-- Source: SANE's pixma backend, `backend/pixma/pixma_mp150.c` (sane-backends
-  master). The MG2500 (`MG2500_PID 0x176d`) is a "generation 5" flatbed
-  there: CIS sensor, `DEVICE("Canon PIXMA MG2500 Series", ..., 0, 600, 0, 0,
-  638, 877, PIXMA_CAP_CIS)`: 75-600 dpi (75 x 2^n), 638 x 877 units of
-  1/75 in (8.5 x 11.69 in), no ADF. SANE uses interface 0.
-- Command: u16be code, 10 zeros, u32be payload length (+ expected reply data
-  length) at offset 12, payload whose last byte makes its sum 0 (mod 256).
-  Reply: u16be status (`0x0606` ok, `0x1414` busy (byte 3 = 0x21), `0x1515`
-  failed / canceled), 6 zeros, data whose last byte makes its sum 0. A
-  failed command may answer with the bare 8-byte header. XML commands
-  (IVEC, servicetype `scan`) go raw on the same endpoints; the reply contains
-  `<ivec:response>OK</ivec:response>`.
-- Commands: `0xdb20` start session, `0xee20` gamma, `0xd820` scan parameters,
-  `0xd920` start scan, `0xda20` status (8 bytes), `0xd420` read image,
-  `0xef20` abort session, `0xff20` error info (16 bytes).
+- Source: SANE's pixma backend, `backend/pixma/pixma_mp150.c` (sane-backends master). The MG2500 (`MG2500_PID 0x176d`) is a "generation 5" flatbed there: CIS sensor, `DEVICE("Canon PIXMA MG2500 Series", ..., 0, 600, 0, 0, 638, 877, PIXMA_CAP_CIS)`: 75-600 dpi (75 x 2^n), 638 x 877 units of 1/75 in (8.5 x 11.69 in), no ADF. SANE uses interface 0.
+- Command: u16be code, 10 zeros, u32be payload length (+ expected reply data length) at offset 12, payload whose last byte makes its sum 0 (mod 256). Reply: u16be status (`0x0606` ok, `0x1414` busy (byte 3 = 0x21), `0x1515` failed / canceled), 6 zeros, data whose last byte makes its sum 0. A failed command may answer with the bare 8-byte header. XML commands (IVEC, servicetype `scan`) go raw on the same endpoints; the reply contains `<ivec:response>OK</ivec:response>`.
+- Commands: `0xdb20` start session, `0xee20` gamma, `0xd820` scan parameters, `0xd920` start scan, `0xda20` status (8 bytes), `0xd420` read image, `0xef20` abort session, `0xff20` error info (16 bytes).
 - Scan sequence:
-  1. XML `StartJob` (jobID 00000001, bidi 1) and `VendorCmd/ModeShift`
-     (ijmode 1).
-  2. Start session; while busy retry every second up to 10 times; if still
-     busy or timing out, drain bulk IN, abort session, wait 500 ms, retry
-     once.
-  3. Gamma table three times: payload 2056 bytes, `[0] = 0x10`, u16be
-     `0x0804` at 2, then 1024 x u16le of `65535 * (i/1023)^(1/2.2)`.
-  4. Parameters, 0x38 bytes: `[0]=1` (flatbed), `[1]=1`, `[2]=1`, `[5]`
-     calibrate, u16be dpi `| 0x8000` at 8 and 0xa (x = y), u32be x - xs at
-     0xc (xs = x mod 32), y at 0x10, raw width `ALIGN(w + xs, 32)` at 0x14,
-     height at 0x18, `[0x1c]=0x08` colour, `[0x1d]=24` bpp, `[0x1f]=1`,
-     `[0x20]=0xff`, `[0x21]=0x81` (0x83 + `[3]=1` would be the scanner's own
-     JPEG, which SANE only uses for ADF models), `[0x23]=2`, `[0x24]=1`,
-     `[0x30]=1`.
-  5. Start scan; poll status every second until byte 0 bit 0 or 1
-     (calibrated), at most 120 s; wait 1 s (SANE; Canon's driver 1.5 s).
-  6. Read image: command `0xd420` with u32be `512 KB + 8` at 12 (`32 + 8` once
-     flags had 0x20). Reply: 8-byte header, flags at 8 (0x08 end of scan,
-     0x10 no more paper, 0x20 no more data), u32be length at 12, then raw
-     data. Repeat until `flags & 0x28 == 0x28`. Length 0 = not ready: sleep
-     10 ms. A failed block: read error info, stop.
-  7. Always: abort session, then XML `EndJob`. Otherwise the scanner reports
-     `PCScanning` and may need a power cycle. (SANE skips `EndJob` when
-     `ModeShift` fails; we send it whenever `StartJob` succeeded.)
-- Image data: 8-bit RGB lines of the raw width (padded to 32 pixels), not
-  aligned to blocks; we assemble lines and crop `xs` on the left. No pixel
-  reordering at 600 dpi on generation 5.
-- Transfers: we read blocks in 8 KB pieces (`PIXMA_READ_CHUNK`), so nothing
-  block-sized is held. Timeouts as SANE: 1 s per transfer, 8 tries for a
-  reply. Zero-length packets after replies that are a multiple of 64 bytes
-  are skipped (whether the MG2500 sends them is unknown; harmless either
-  way). IN transfers are rounded up to the max packet size (an ESP-IDF
-  requirement); a read never asks for more than the reply has left except at
-  its end.
-- Calibration on every scan (`scanimage` reopens the device each run, so
-  SANE's "once" default means every scan).
-- Measured: 150 dpi A4 takes 15.2 s, about 6 s of it warm-up and
-  calibration; 394 KB of JPEG for a printed A4 document; 2 s of encoding.
+  1. XML `StartJob` (jobID 00000001, bidi 1) and `VendorCmd/ModeShift` (ijmode 1).
+  2. Start session; while busy retry every second up to 10 times; if still busy or timing out, drain bulk IN, abort session, wait 500 ms, retry once.
+  3. Gamma table three times: payload 2056 bytes, `[0] = 0x10`, u16be `0x0804` at 2, then 1024 x u16le of `65535 * (i/1023)^(1/2.2)`.
+  4. Parameters, 0x38 bytes: `[0]=1` (flatbed), `[1]=1`, `[2]=1`, `[5]` calibrate, u16be dpi `| 0x8000` at 8 and 0xa (x = y), u32be x - xs at 0xc (xs = x mod 32), y at 0x10, raw width `ALIGN(w + xs, 32)` at 0x14, height at 0x18, `[0x1c]=0x08` colour, `[0x1d]=24` bpp, `[0x1f]=1`, `[0x20]=0xff`, `[0x21]=0x81` (0x83 + `[3]=1` would be the scanner's own JPEG, which SANE only uses for ADF models), `[0x23]=2`, `[0x24]=1`, `[0x30]=1`.
+  5. Start scan; poll status every second until byte 0 bit 0 or 1 (calibrated), at most 120 s; wait 1 s (SANE; Canon's driver 1.5 s).
+  6. Read image: command `0xd420` with u32be `512 KB + 8` at 12 (`32 + 8` once flags had 0x20). Reply: 8-byte header, flags at 8 (0x08 end of scan, 0x10 no more paper, 0x20 no more data), u32be length at 12, then raw data. Repeat until `flags & 0x28 == 0x28`. Length 0 = not ready: sleep 10 ms. A failed block: read error info, stop.
+  7. Always: abort session, then XML `EndJob`. Otherwise the scanner reports `PCScanning` and may need a power cycle. (SANE skips `EndJob` when `ModeShift` fails; we send it whenever `StartJob` succeeded.)
+- Image data: 8-bit RGB lines of the raw width (padded to 32 pixels), not aligned to blocks; we assemble lines and crop `xs` on the left. No pixel reordering at 600 dpi on generation 5.
+- Transfers: we read blocks in 8 KB pieces (`PIXMA_READ_CHUNK`), so nothing block-sized is held. Timeouts as SANE: 1 s per transfer, 8 tries for a reply. Zero-length packets after replies that are a multiple of 64 bytes are skipped (whether the MG2500 sends them is unknown; harmless either way). IN transfers are rounded up to the max packet size (an ESP-IDF requirement); a read never asks for more than the reply has left except at its end.
+- Calibration on every scan (`scanimage` reopens the device each run, so SANE's "once" default means every scan).
+- Measured: 150 dpi A4 takes 15.2 s, about 6 s of it warm-up and calibration; 394 KB of JPEG for a printed A4 document; 2 s of encoding.
 - The interrupt endpoint `0x89` (button events in SANE) is not read.
 
 ## JPEG encoder (`jpeg_enc.c`)
 
-- Baseline, YCbCr 4:2:0, standard Annex K tables, libjpeg's quality scaling,
-  JFIF with the dpi. Lines are converted as they arrive: Y into a 16-row
-  strip, Cb/Cr averaged over 2x2 into 8-row strips; each full strip is one
-  row of 16x16 MCUs and is encoded at once. Memory: 1.5 bytes per pixel of
-  width x 16 rows plus small tables.
-- Integer only (libjpeg's `jpeg_fdct_islow`, fixed-point colour conversion,
-  2^18 reciprocals for quantisation), so the output is byte-identical on the
-  host, in QEMU and on the board. Coefficients clamped to the baseline range.
-- `jpeg_enc_finish` pads missing lines with white: the header carries the
-  height, so a stream always ends as a complete image.
-- Quality on the test page: PSNR 40-47 dB (limited by 4:2:0 on sharp colour
-  edges); about 2 s of CPU for a 150 dpi A4 page on the board.
+- Baseline, YCbCr 4:2:0, standard Annex K tables, libjpeg's quality scaling, JFIF with the dpi. Lines are converted as they arrive: Y into a 16-row strip, Cb/Cr averaged over 2x2 into 8-row strips; each full strip is one row of 16x16 MCUs and is encoded at once. Memory: 1.5 bytes per pixel of width x 16 rows plus small tables.
+- Integer only (libjpeg's `jpeg_fdct_islow`, fixed-point colour conversion, 2^18 reciprocals for quantisation), so the output is byte-identical on the host, in QEMU and on the board. Coefficients clamped to the baseline range.
+- `jpeg_enc_finish` pads missing lines with white: the header carries the height, so a stream always ends as a complete image.
+- Quality on the test page: PSNR 40-47 dB (limited by 4:2:0 on sharp colour edges); about 2 s of CPU for a 150 dpi A4 page on the board.
 
 ## Scanning (`scan_service.c`)
 
-- Pipeline: scanner lines -> crop -> `jpeg_enc` (quality 85) -> shared
-  buffer -> HTTP. Colour only (a design decision: no grayscale).
-- Every scan has an id, `<boot>-<n>` (`boot` from `esp_random()`), and a
-  source: `web` (kept, from the web UI), `stream`, `button`, `escl`.
-- One scan thread at a time (8 KB stack, about 3 KB used). The connection
-  that streams is the ring's consumer; the thread waits for it before giving
-  the buffer back. Statuses: idle, scanning, done, failed, canceled.
-- Shared buffer (`shared_buf.c`): all PSRAM but 512 KB, allocated at boot
-  (7.5 MB on the board). Users take turns (scan, dev print capture); whoever
-  wrote it last owns the content until the next user takes it; readers block
-  writers.
-- Stream mode (`GET /scan/stream.jpg?dpi=150|300|600&paper=a4|letter`): the
-  buffer is a ring between the scan thread and the connection. Usually the
-  whole JPEG fits. A client that falls behind pauses the scan (the scanner
-  waits); one that stops reading for 60 s cancels it (and the connection's
-  30 s send timeout ends it); one that disconnects cancels it at once. A
-  stream always ends with a complete JPEG (missing lines white), unless
-  nobody reads it any more.
-- Last ("kept") mode (`POST /scan/last?dpi=75|150|300|600&paper=...`, 150
-  dpi by default; answers `{"ok":true,"id":...}`): kept whole for
-  `GET /scan/last.jpg` until the buffer's next user. A JPEG that does not fit
-  fails the scan (300 dpi A4 documents are a few hundred KB to a few MB, so
-  the web UI keeps scans up to 300 dpi and streams 600 dpi).
-- A kept scan can be read while it is scanned: `GET
-  /scan/last.jpg?id=<id>&from=<offset>` returns what was encoded so far from
-  the offset (possibly nothing), with `X-Scan-State: scanning|done|...`; the
-  bytes before `wpos` never change in this mode. The thread keeps the buffer
-  until such readers are done (`S.readers`). `id` not kept -> 404. This is
-  how every browser shows a scan someone else (or the button) started.
-- The button (`scan_service_start_button`, from `main.c`): a kept A4 scan at
-  150 dpi (the user's choice; the web UI also defaults to A4 150 dpi).
-- `GET /scan/status` (JSON: scanner, state, mode, id, source, dpi, paper,
-  width, height, lines, bytes, elapsed, recent, error, last, last_id,
-  last_paper, last_dpi, button) is also the `scan` member of the `/events`
-  snapshot. `recent` = ended less than 10 minutes ago (a flag, not an age,
-  so the snapshot does not change every second). `POST /scan/cancel` stops at
-  the next block. A second scan gets 409; a scan while printing gets 503, and
-  print jobs get `server-error-busy` while scanning. Holding BOOT 2 s also
-  cancels a scan. `GET /scan` redirects to `/#/scanner` (the old page is
-  gone).
-- Areas: the service scans any `{dpi, x, y, w, h}` (pixels at that dpi);
-  presets in 1/600 in: A4 4961x7016, Letter 5100x6600, and `card` 2400x1700
-  (4 x 2.83 in from the corner of the glass, room for an 85.6 x 54 mm card:
-  a 300 dpi card scan is about 3 MB of raw RGB instead of 26 MB).
+- Pipeline: scanner lines -> crop -> `jpeg_enc` (quality 85) -> shared buffer -> HTTP. Colour only (a design decision: no grayscale).
+- Every scan has an id, `<boot>-<n>` (`boot` from `esp_random()`), and a source: `web` (kept, from the web UI), `stream`, `button`, `escl`.
+- One scan thread at a time (8 KB stack, about 3 KB used). The connection that streams is the ring's consumer; the thread waits for it before giving the buffer back. Statuses: idle, scanning, done, failed, canceled.
+- Shared buffer (`shared_buf.c`): all PSRAM but 512 KB, allocated at boot (7.5 MB on the board). Users take turns (scan, dev print capture); whoever wrote it last owns the content until the next user takes it; readers block writers.
+- Stream mode (`GET /scan/stream.jpg?dpi=150|300|600&paper=a4|letter`): the buffer is a ring between the scan thread and the connection. Usually the whole JPEG fits. A client that falls behind pauses the scan (the scanner waits); one that stops reading for 60 s cancels it (and the connection's 30 s send timeout ends it); one that disconnects cancels it at once. A stream always ends with a complete JPEG (missing lines white), unless nobody reads it any more.
+- Last ("kept") mode (`POST /scan/last?dpi=75|150|300|600&paper=...`, 150 dpi by default; answers `{"ok":true,"id":...}`): kept whole for `GET /scan/last.jpg` until the buffer's next user. A JPEG that does not fit fails the scan (300 dpi A4 documents are a few hundred KB to a few MB, so the web UI keeps scans up to 300 dpi and streams 600 dpi).
+- A kept scan can be read while it is scanned: `GET /scan/last.jpg?id=<id>&from=<offset>` returns what was encoded so far from the offset (possibly nothing), with `X-Scan-State: scanning|done|...`; the bytes before `wpos` never change in this mode. The thread keeps the buffer until such readers are done (`S.readers`). `id` not kept -> 404. This is how every browser shows a scan someone else (or the button) started.
+- The button (`scan_service_start_button`, from `main.c`): a kept A4 scan at 150 dpi (the user's choice; the web UI also defaults to A4 150 dpi).
+- `GET /scan/status` (JSON: scanner, state, mode, id, source, dpi, paper, width, height, lines, bytes, elapsed, recent, error, last, last_id, last_paper, last_dpi, button) is also the `scan` member of the `/events` snapshot. `recent` = ended less than 10 minutes ago (a flag, not an age, so the snapshot does not change every second). `POST /scan/cancel` stops at the next block. A second scan gets 409; a scan while printing gets 503, and print jobs get `server-error-busy` while scanning. Holding BOOT 2 s also cancels a scan. `GET /scan` redirects to `/#/scanner` (the old page is gone).
+- Areas: the service scans any `{dpi, x, y, w, h}` (pixels at that dpi); presets in 1/600 in: A4 4961x7016, Letter 5100x6600, and `card` 2400x1700 (4 x 2.83 in from the corner of the glass, room for an 85.6 x 54 mm card: a 300 dpi card scan is about 3 MB of raw RGB instead of 26 MB).
 
 ## eSCL / AirScan
 
-- Same server (ports 80 and 631) under `/eSCL`; mDNS `_uscan._tcp` on port 80
-  with `txtvers=1 vers=2.0 rs=eSCL ty=... note= pdl=image/jpeg cs=color
-  is=platen duplex=F UUID=<printer UUID> adminurl representation=/icon.png`.
-  The IPP record says `Scan=T`. The instance name is `PRINTER_NAME`.
-- `GET /eSCL/ScannerCapabilities`: version 2.0, make and model, UUID, admin
-  and icon URIs, platen 16..2552 x 16..3508 (1/300 in), one setting profile
-  (RGB24, RGB, discrete 75/150/300/600, `image/jpeg` as DocumentFormat and
-  DocumentFormatExt), intents Document, TextAndGraphic, Photo, Preview,
-  MaxOptical 600.
-- `GET /eSCL/ScannerStatus`: `Idle`, `Processing` (a scan runs) or `Stopped`
-  (no scanner), plus the last 4 jobs (state Pending, Processing, Completed,
-  Canceled, Aborted; reason JobQueued, JobScanning,
-  JobCompletedSuccessfully, JobCanceledByUser, AbortedBySystem).
-- `POST /eSCL/ScanJobs` (scan settings XML, read with
-  `airprint_http_read_body`): InputSource other than Platen -> 409; region
-  units other than ThreeHundredthsOfInches -> 409; the resolution becomes
-  the lowest native one at least the requested one; the region is converted
-  to pixels and clipped; ColorMode and format are ignored (always RGB24
-  JPEG). Answers 201 with `Location: /eSCL/ScanJobs/<id>` (a path, as
-  AirSane). 503 when no scanner or a scan runs.
-- `GET .../NextDocument`: starts the scan and streams the JPEG chunked while
-  it is scanned (as AirSane does; macOS accepts it). The next request for the
-  job is 404 (one page per platen job). 503 if the device is busy.
-- `GET .../ScanImageInfo` (actual width, height, bytes per line);
-  `DELETE /eSCL/ScanJobs/<id>` cancels (queued: canceled at once; running:
-  the scan stops and the stream ends).
-- macOS seen on the real Mac (macOS 26.3, AirScanScanner 63.2): capabilities
-  and icon once, `ScannerStatus` every 3 s while a session is open, then
-  `POST ScanJobs` (`TextAndGraphic`, A4 region 2480 x 3508 with
-  `pwg:MustHonor="true"`, `image/jpeg`, Platen, RGB24, the chosen dpi),
-  `NextDocument`, and a `DELETE` of the finished job. Canceling in Image
-  Capture sends `DELETE` mid-stream. Verified end to end: on the host server
-  through Image Capture, and on the board (150 dpi A4 in 15 s).
-- References: AirSane (https://github.com/SimulPiscator/AirSane, works with
-  macOS; its NextDocument is chunked, Location a path, macOS needs
-  power-of-two icon sizes and may need IPv6), sane-airscan.
-- Debugging macOS: the driver is
-  `/System/Library/Image Capture/Devices/AirScanScanner.app`; its log
-  messages are `<private>`. The most useful tool was a logging proxy between
-  macOS and the server (see the session history: a 30-line Python TCP proxy
-  on another port, announced with `dns-sd -R`). A scripted ImageCaptureCore
-  client (`ICDeviceBrowser`, `requestScan`) found the scanner and read the
-  capabilities but never got the driver to `POST` (it polled status
-  forever) and crashed in `requestSelect`: test with Image Capture itself.
-  In zsh, `log` is a builtin (use `/usr/bin/log stream --process
-  AirScanScanner`).
+- Same server (ports 80 and 631) under `/eSCL`; mDNS `_uscan._tcp` on port 80 with `txtvers=1 vers=2.0 rs=eSCL ty=... note= pdl=image/jpeg cs=color is=platen duplex=F UUID=<printer UUID> adminurl representation=/icon.png`. The IPP record says `Scan=T`. The instance name is `PRINTER_NAME`.
+- `GET /eSCL/ScannerCapabilities`: version 2.0, make and model, UUID, admin and icon URIs, platen 16..2552 x 16..3508 (1/300 in), one setting profile (RGB24, RGB, discrete 75/150/300/600, `image/jpeg` as DocumentFormat and DocumentFormatExt), intents Document, TextAndGraphic, Photo, Preview, MaxOptical 600.
+- `GET /eSCL/ScannerStatus`: `Idle`, `Processing` (a scan runs) or `Stopped` (no scanner), plus the last 4 jobs (state Pending, Processing, Completed, Canceled, Aborted; reason JobQueued, JobScanning, JobCompletedSuccessfully, JobCanceledByUser, AbortedBySystem).
+- `POST /eSCL/ScanJobs` (scan settings XML, read with `airprint_http_read_body`): InputSource other than Platen -> 409; region units other than ThreeHundredthsOfInches -> 409; the resolution becomes the lowest native one at least the requested one; the region is converted to pixels and clipped; ColorMode and format are ignored (always RGB24 JPEG). Answers 201 with `Location: /eSCL/ScanJobs/<id>` (a path, as AirSane). 503 when no scanner or a scan runs.
+- `GET .../NextDocument`: starts the scan and streams the JPEG chunked while it is scanned (as AirSane does; macOS accepts it). The next request for the job is 404 (one page per platen job). 503 if the device is busy.
+- `GET .../ScanImageInfo` (actual width, height, bytes per line); `DELETE /eSCL/ScanJobs/<id>` cancels (queued: canceled at once; running: the scan stops and the stream ends).
+- macOS seen on the real Mac (macOS 26.3, AirScanScanner 63.2): capabilities and icon once, `ScannerStatus` every 3 s while a session is open, then `POST ScanJobs` (`TextAndGraphic`, A4 region 2480 x 3508 with `pwg:MustHonor="true"`, `image/jpeg`, Platen, RGB24, the chosen dpi), `NextDocument`, and a `DELETE` of the finished job. Canceling in Image Capture sends `DELETE` mid-stream. Verified end to end: on the host server through Image Capture, and on the board (150 dpi A4 in 15 s).
+- References: AirSane (https://github.com/SimulPiscator/AirSane, works with macOS; its NextDocument is chunked, Location a path, macOS needs power-of-two icon sizes and may need IPv6), sane-airscan.
+- Debugging macOS: the driver is `/System/Library/Image Capture/Devices/AirScanScanner.app`; its log messages are `<private>`. The most useful tool was a logging proxy between macOS and the server (see the session history: a 30-line Python TCP proxy on another port, announced with `dns-sd -R`). A scripted ImageCaptureCore client (`ICDeviceBrowser`, `requestScan`) found the scanner and read the capabilities but never got the driver to `POST` (it polled status forever) and crashed in `requestSelect`: test with Image Capture itself. In zsh, `log` is a builtin (use `/usr/bin/log stream --process AirScanScanner`).
 
 ## Web UI (`web/`)
 
-- Svelte 5 (runes) + TypeScript, built by Vite into `web/dist`, packed into
-  the firmware by `tools/gen_web.py` (each file gzipped, about 590 KB in
-  all; the firmware is 1.67 MB of the 4 MB slot) and served by
-  `components/webui` with `Content-Encoding: gzip`, an ETag (304 on
-  `If-None-Match`) and `immutable` caching for the hashed `/assets/` files.
-  The app (51 KB gzipped) loads pdf.js (156 KB + the worker, 1.3 MB raw,
-  legacy build for older Safari) only when a PDF is opened. It works with no
-  internet access. Without Node.js and without `web/dist`, the table is
-  empty and the server shows its plain status page at `/`.
-- Layout: a left navigation (Printer, Scanner, Files, Process) with live
-  status lines; under 760 px wide the navigation is the first screen and a
-  section opens full screen with a back arrow (hash routes `#/printer` etc.,
-  so the phone's back works). Light and dark themes.
-- Live state: `EventSource('/events')`. The server keeps one JSON snapshot
-  (`{"printer":..., "scan":...}`, built every second by `events.c` from
-  `airprint_status_json` and `scan_service_status_json`) and sends it when it
-  differs from the last one; a keep-alive comment every 15 s. The listener's
-  socket is handed over (`airprint_http_detach`) to one hub thread, so it
-  uses neither a connection slot nor a thread; at most 4 listeners (the
-  oldest is dropped), a listener whose send buffer is full is dropped, and
-  EventSource reconnects (`retry: 2000`). Server-Sent Events rather than
-  WebSockets: the data only flows to the browser (commands are plain
-  requests), and it reuses the HTTP server (no SHA-1 handshake, no framing).
-  The printer status inside costs a USB control transfer, so it is cached
-  for 2 s.
-- Files: IndexedDB (`printer-web`, stores `files` and `kv`) in each browser,
-  nothing on the device. Each file keeps its blob, a JPEG thumbnail, its
-  pages (PDF), pixel size and dpi (JFIF / PNG pHYs, below 75 means unknown).
-  The tab groups files by day (local date of `created`, newest first:
-  Today, Yesterday, "Mon, 28 Sep"); Select mode numbers files in the order
-  they are picked (a day's check picks the whole day) for Delete or Save as
-  PDF: every page of the picked files, in that order, through the Process
-  export at their own size ("as cropped", 200 dpi; PDF pages are rasterized).
-- Scans reach Files: every open page follows a kept scan as it grows
-  (polling `last.jpg?from=` every 1.2 s), shows it, and saves it as
-  `scan-<id>` with `add()`, which fails for a second tab of the same browser
-  (`ConstraintError`); saved ids are remembered in `kv.importedScans`, so a
-  deleted scan does not come back. A page opened later saves a kept scan
-  only if it is `recent`. 600 dpi scans are streamed to the asking page.
-- Printing: the browser renders the pages and sends URF over IPP to
-  `/ipp/print` (port 80), so the device only sees what AirPrint clients send.
-  A page is drawn in bands of about 2.5 Mpx (phones cap a canvas near 16
-  Mpx; A4 at 600 dpi is 35 Mpx): pdf.js renders each band with a
-  translation, images are drawn with `drawImage`; bands outside the content
-  are white without drawing. `urf.ts` compresses the lines (line repeats,
-  runs, literals, "rest is white"); pages are kept as Blobs, copies reuse
-  them. The request goes through `XMLHttpRequest` for upload progress
-  (streamed request bodies need HTTP/2 in browsers), whose pace is the
-  printer's since the server prints while it receives; the response comes
-  when the job is done. Sizes seen: the 2 first pages of
-  `document-a4.pdf` at 300 dpi 7.1 MB, a 512 x 768 photo on A4 at 600 dpi
-  10 MB. Options: copies, page ranges, A4/Letter, fit (inside the printable
-  area) / fill / actual size (a scan of a full page lands where the
-  original was: a copy), orientation (auto turns landscape content a
-  quarter counter-clockwise), colour or gray (sgray), 600 or 300 dpi. Scans
-  default to actual size, everything else to fit.
-- Process: a workspace (`kv.workspace`) of items: a page (file, page, rotation,
-  crop normalized in the rotated page) or an ID card (front and back crops,
-  landscape or portrait). The crop editor locks the card's shape and has an
-  auto-detect (`autocrop.ts`: the box of pixels that differ from the border's
-  median, ignoring specks). ID card: "Scan front/back" makes a `card` scan
-  and crops around the card; both go on one A4/Letter sheet at 85.6 x 54 mm,
-  in the upper and lower halves. Export: each sheet is rendered at 150/200/300
-  dpi, JPEG-encoded and written by `pdfwriter.ts` (pages of DCTDecode
-  images); page size A4, Letter (landscape pages get landscape sheets;
-  real size when known and it fits, else as large as fits) or "as cropped".
-- http:// on the LAN is not a secure context: no `crypto.randomUUID`, Web
-  Locks, service workers or clipboard writes. IndexedDB, Blob URLs, workers
-  and EventSource work.
+- Svelte 5 (runes) + TypeScript, built by Vite into `web/dist`, packed into the firmware by `tools/gen_web.py` (each file gzipped, about 590 KB in all; the firmware is 1.67 MB of the 4 MB slot) and served by `components/webui` with `Content-Encoding: gzip`, an ETag (304 on `If-None-Match`) and `immutable` caching for the hashed `/assets/` files. The app (51 KB gzipped) loads pdf.js (156 KB + the worker, 1.3 MB raw, legacy build for older Safari) only when a PDF is opened. It works with no internet access. Without Node.js and without `web/dist`, the table is empty and the server shows its plain status page at `/`.
+- Layout: a left navigation (Printer, Scanner, Files, Process) with live status lines; under 760 px wide the navigation is the first screen and a section opens full screen with a back arrow (hash routes `#/printer` etc., so the phone's back works). Light and dark themes.
+- Live state: `EventSource('/events')`. The server keeps one JSON snapshot (`{"printer":..., "scan":...}`, built every second by `events.c` from `airprint_status_json` and `scan_service_status_json`) and sends it when it differs from the last one; a keep-alive comment every 15 s. The listener's socket is handed over (`airprint_http_detach`) to one hub thread, so it uses neither a connection slot nor a thread; at most 4 listeners (the oldest is dropped), a listener whose send buffer is full is dropped, and EventSource reconnects (`retry: 2000`). Server-Sent Events rather than WebSockets: the data only flows to the browser (commands are plain requests), and it reuses the HTTP server (no SHA-1 handshake, no framing). The printer status inside costs a USB control transfer, so it is cached for 2 s.
+- Files: IndexedDB (`printer-web`, stores `files` and `kv`) in each browser, nothing on the device. Each file keeps its blob, a JPEG thumbnail, its pages (PDF), pixel size and dpi (JFIF / PNG pHYs, below 75 means unknown). The tab groups files by day (local date of `created`, newest first: Today, Yesterday, "Mon, 28 Sep"); Select mode numbers files in the order they are picked (a day's check picks the whole day) for Delete or Save as PDF: every page of the picked files, in that order, through the Process export at their own size ("as cropped", 200 dpi; PDF pages are rasterized).
+- Scans reach Files: every open page follows a kept scan as it grows (polling `last.jpg?from=` every 1.2 s), shows it, and saves it as `scan-<id>` with `add()`, which fails for a second tab of the same browser (`ConstraintError`); saved ids are remembered in `kv.importedScans`, so a deleted scan does not come back. A page opened later saves a kept scan only if it is `recent`. 600 dpi scans are streamed to the asking page.
+- Printing: the browser renders the pages and sends URF over IPP to `/ipp/print` (port 80), so the device only sees what AirPrint clients send. A page is drawn in bands of about 2.5 Mpx (phones cap a canvas near 16 Mpx; A4 at 600 dpi is 35 Mpx): pdf.js renders each band with a translation, images are drawn with `drawImage`; bands outside the content are white without drawing. `urf.ts` compresses the lines (line repeats, runs, literals, "rest is white"); pages are kept as Blobs, copies reuse them. The request goes through `XMLHttpRequest` for upload progress (streamed request bodies need HTTP/2 in browsers), whose pace is the printer's since the server prints while it receives; the response comes when the job is done. Sizes seen: the 2 first pages of `document-a4.pdf` at 300 dpi 7.1 MB, a 512 x 768 photo on A4 at 600 dpi 10 MB. Options: copies, page ranges, A4/Letter, fit (inside the printable area) / fill / actual size (a scan of a full page lands where the original was: a copy), orientation (auto turns landscape content a quarter counter-clockwise), colour or gray (sgray), 600 or 300 dpi. Scans default to actual size, everything else to fit.
+- Process: a workspace (`kv.workspace`) of items: a page (file, page, rotation, crop normalized in the rotated page) or an ID card (front and back crops, landscape or portrait). The crop editor locks the card's shape and has an auto-detect (`autocrop.ts`: the box of pixels that differ from the border's median, ignoring specks). ID card: "Scan front/back" makes a `card` scan and crops around the card; both go on one A4/Letter sheet at 85.6 x 54 mm, in the upper and lower halves. Export: each sheet is rendered at 150/200/300 dpi, JPEG-encoded and written by `pdfwriter.ts` (pages of DCTDecode images); page size A4, Letter (landscape pages get landscape sheets; real size when known and it fits, else as large as fits) or "as cropped".
+- http:// on the LAN is not a secure context: no `crypto.randomUUID`, Web Locks, service workers or clipboard writes. IndexedDB, Blob URLs, workers and EventSource work.
 
 ## AirPrint / IPP and the HTTP server
 
-- One server (`airprint.c`), two listening ports: 631 for IPP (and the
-  pages), 80 for browsers (`web_port`; the mDNS `adminurl` points there). Port
-  80 also accepts IPP.
-- Routing: POST to `/` or `/ipp*` is IPP; other POST and DELETE requests go
-  to the `http_handler` hook (which may read the body with
-  `airprint_http_read_body`; the rest is drained after it), GET/HEAD go to
-  the hook first and then to the built-in pages (`/`, `/icon.png`). Response
-  helpers: `airprint_http_send(_ex)` (extra headers such as `Location`),
-  chunked `airprint_http_stream_begin/write/end` (30 s send timeout; plain
-  close-delimited for HTTP/1.0), `airprint_http_host`,
-  `airprint_http_if_none_match`, `airprint_http_detach` (the socket is the
-  caller's from then on; the connection slot is freed). The platforms chain
-  the hooks: `scan_service_http || events_http || webui_http`.
-- mDNS: `_ipp._tcp` on port 631 with the `_universal` subtype (needed by iOS)
-  and `_print` (IPP Everywhere). The TXT record follows Bonjour Printing,
-  with `URF=V1.4,CP1,W8,SRGB24,RS300-600,MT1,PQ3-4-5`, `air=none`,
-  `Scan=T`. Plus `_uscan._tcp` (eSCL). `CONFIG_MDNS_MAX_SERVICES=4`.
-- Operations: Print-Job, Validate-Job, Create-Job, Send-Document, Cancel-Job,
-  Cancel-My-Jobs, Close-Job, Get-Job-Attributes, Get-Jobs,
-  Get-Printer-Attributes, Identify-Printer (flashes the LED blue).
-- Formats: `image/urf` and `image/pwg-raster` (8-bit sRGB or sgray, 300/600
-  dpi, sniffed for `application/octet-stream`). The page's dpi picks the
-  printer mode, and its height picks the paper (under 11.35 in means Letter).
-- Pipeline: socket -> raster decoder (one line at a time) -> `bjl_render`
-  (crop to the printable area, sRGB -> CMYK with full black generation
-  `C = (c-k)/(1-k)`, dot gain curve, ordered dither) -> `canon_bjl` ->
-  `job_write` hook. One job at a time; a second one gets `server-error-busy`.
-- iOS flow seen on hardware: Validate-Job, Create-Job, then Send-Document
-  with URF at 600 dpi colour. No IPPS was needed.
-- HTTP: keep-alive, chunked bodies, `Expect: 100-continue`. Unread document
-  data is always drained before replying: closing early resets the
-  connection, the client loses the response, and libcups retries the whole
-  job.
-- iOS keeps several keep-alive connections open while it watches a job, so
-  the limit is 8 connections with a 15 s idle timeout. Refusals are logged.
-- Status mapping: `MarkerSupplyAttention` becomes `marker-supply-low-warning`.
-  The `CIR` field gives ink levels (`UK` means unknown). The port status
-  "paper empty" bit becomes `media-empty-error` (not checked while scanning).
-  The names used for jam and cover open are guesses (never seen on
-  hardware). While scanning, the printer state is "processing" with the
-  message "Scanning".
-- Conformance (ipptool): IPP 1.1 and 2.0 pass everything, and IPP Everywhere
-  passes all but `image/jpeg`. Results are the same on the host, in QEMU and
-  on the board.
+- One server (`airprint.c`), two listening ports: 631 for IPP (and the pages), 80 for browsers (`web_port`; the mDNS `adminurl` points there). Port 80 also accepts IPP.
+- Routing: POST to `/` or `/ipp*` is IPP; other POST and DELETE requests go to the `http_handler` hook (which may read the body with `airprint_http_read_body`; the rest is drained after it), GET/HEAD go to the hook first and then to the built-in pages (`/`, `/icon.png`). Response helpers: `airprint_http_send(_ex)` (extra headers such as `Location`), chunked `airprint_http_stream_begin/write/end` (30 s send timeout; plain close-delimited for HTTP/1.0), `airprint_http_host`, `airprint_http_if_none_match`, `airprint_http_detach` (the socket is the caller's from then on; the connection slot is freed). The platforms chain the hooks: `scan_service_http || events_http || webui_http`.
+- mDNS: `_ipp._tcp` on port 631 with the `_universal` subtype (needed by iOS) and `_print` (IPP Everywhere). The TXT record follows Bonjour Printing, with `URF=V1.4,CP1,W8,SRGB24,RS300-600,MT1,PQ3-4-5`, `air=none`, `Scan=T`. Plus `_uscan._tcp` (eSCL). `CONFIG_MDNS_MAX_SERVICES=4`.
+- Operations: Print-Job, Validate-Job, Create-Job, Send-Document, Cancel-Job, Cancel-My-Jobs, Close-Job, Get-Job-Attributes, Get-Jobs, Get-Printer-Attributes, Identify-Printer (flashes the LED blue).
+- Formats: `image/urf` and `image/pwg-raster` (8-bit sRGB or sgray, 300/600 dpi, sniffed for `application/octet-stream`). The page's dpi picks the printer mode, and its height picks the paper (under 11.35 in means Letter).
+- Pipeline: socket -> raster decoder (one line at a time) -> `bjl_render` (crop to the printable area, sRGB -> CMYK with full black generation `C = (c-k)/(1-k)`, dot gain curve, ordered dither) -> `canon_bjl` -> `job_write` hook. One job at a time; a second one gets `server-error-busy`.
+- iOS flow seen on hardware: Validate-Job, Create-Job, then Send-Document with URF at 600 dpi colour. No IPPS was needed.
+- HTTP: keep-alive, chunked bodies, `Expect: 100-continue`. Unread document data is always drained before replying: closing early resets the connection, the client loses the response, and libcups retries the whole job.
+- iOS keeps several keep-alive connections open while it watches a job, so the limit is 8 connections with a 15 s idle timeout. Refusals are logged.
+- Status mapping: `MarkerSupplyAttention` becomes `marker-supply-low-warning`. The `CIR` field gives ink levels (`UK` means unknown). The port status "paper empty" bit becomes `media-empty-error` (not checked while scanning). The names used for jam and cover open are guesses (never seen on hardware). While scanning, the printer state is "processing" with the message "Scanning".
+- Conformance (ipptool): IPP 1.1 and 2.0 pass everything, and IPP Everywhere passes all but `image/jpeg`. Results are the same on the host, in QEMU and on the board.
 
 ## Debug mode (`MODE=debug`)
 
-For a board left at the printer without a USB cable: normal printing and
-scanning, plus (`src/debug.c`, driven by `tools/remote.py`):
+For a board left at the printer without a USB cable: normal printing and scanning, plus (`src/debug.c`, driven by `tools/remote.py`):
 
-- HTTP server (`esp_http_server`, port 8080, 3 sockets, 12 URI handlers;
-  the default of 8 is too few): `GET /` (help), `/info`, `/log`,
-  `POST /ota`, `/reboot`, `GET /coredump`, `POST /coredump/erase`,
-  `POST /loglevel?tag=&level=`, `POST /panic`. Live log on TCP 2323 (one
-  client at a time; `nc <host> 2323`).
-- Log: `esp_log_set_vprintf` copies every line (cut at 255 chars) into a
-  64 KB PSRAM ring (started first thing in `app_main`). The last 3 KB also go
-  to RTC memory (`RTC_NOINIT_ATTR`, survives panics, watchdogs and software
-  resets, not power loss) and open the next boot's log as "end of the
-  previous boot's log", followed by the reset reason. A PSRAM noinit
-  segment is not possible: it conflicts with `SPIRAM_IGNORE_NOTFOUND`,
-  which QEMU needs.
-- Crashes: ELF core dump to the `coredump` partition (128 KB at 0x820000); the
-  next boot logs the crashed task, PC and backtrace; `remote.py crash`
-  downloads the dump and decodes it with `esp_coredump` (PlatformIO's
-  Python) and `xtensa-esp32s3-elf-gdb` (found in `~/.espressif/tools`); it
-  needs the `firmware.elf` of the build that crashed (`--elf`).
-  `remote.py panic` crashes on purpose (null write in a timer callback).
-- OTA: `POST /ota` with `firmware.bin` (the image is checked: ESP32-S3,
-  project name, then `esp_ota_end` validation), refused while printing or
-  scanning (409), written to the other slot, then a restart 1 s after the
-  reply. Rollback (`CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE`): a new image
-  stays "pending" until `debug_ota_confirm` sees WiFi and the debug server
-  up for 20 s (run in every mode, so an image that switches mode is
-  confirmed too); any reset before that, or 180 s without, brings back the
-  previous image. The rollback bootloader marks the image it first boots
-  (USB-flashed) valid.
-- `/info`: version, `elf_sha256` (first 8 bytes of the image's ELF SHA-256,
-  formatted from `app_elf_sha256`; `esp_app_get_elf_sha256` is limited to 9
-  chars by `CONFIG_APP_RETRIEVE_LEN_ELF_SHA`), mode, partition, OTA state,
-  next slot, uptime, `boot_id` (random per boot), reset reason, internal and
-  PSRAM heap, RSSI, core dump, task list with stack high-water marks.
-- `remote.py upload`: reads the ELF SHA from the image (offset 32 + 144),
-  uploads, waits for a new `boot_id` (uptime comparisons failed in QEMU),
-  then for `ota_state valid`; reports a rollback if the old build comes
-  back. `REMOTE_HTTP_PORT` / `REMOTE_LOG_PORT` redirect it (QEMU tests).
-  An OTA of the 1 MB image takes about 11 s; the whole `pio run -t ota`
-  with the confirmation about 45 s.
-- No authentication: anyone on the network can update the firmware. An image
-  built with another MODE has no OTA: the next update needs USB.
+- HTTP server (`esp_http_server`, port 8080, 3 sockets, 12 URI handlers; the default of 8 is too few): `GET /` (help), `/info`, `/log`, `POST /ota`, `/reboot`, `GET /coredump`, `POST /coredump/erase`, `POST /loglevel?tag=&level=`, `POST /panic`. Live log on TCP 2323 (one client at a time; `nc <host> 2323`).
+- Log: `esp_log_set_vprintf` copies every line (cut at 255 chars) into a 64 KB PSRAM ring (started first thing in `app_main`). The last 3 KB also go to RTC memory (`RTC_NOINIT_ATTR`, survives panics, watchdogs and software resets, not power loss) and open the next boot's log as "end of the previous boot's log", followed by the reset reason. A PSRAM noinit segment is not possible: it conflicts with `SPIRAM_IGNORE_NOTFOUND`, which QEMU needs.
+- Crashes: ELF core dump to the `coredump` partition (128 KB at 0x820000); the next boot logs the crashed task, PC and backtrace; `remote.py crash` downloads the dump and decodes it with `esp_coredump` (PlatformIO's Python) and `xtensa-esp32s3-elf-gdb` (found in `~/.espressif/tools`); it needs the `firmware.elf` of the build that crashed (`--elf`). `remote.py panic` crashes on purpose (null write in a timer callback).
+- OTA: `POST /ota` with `firmware.bin` (the image is checked: ESP32-S3, project name, then `esp_ota_end` validation), refused while printing or scanning (409), written to the other slot, then a restart 1 s after the reply. Rollback (`CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE`): a new image stays "pending" until `debug_ota_confirm` sees WiFi and the debug server up for 20 s (run in every mode, so an image that switches mode is confirmed too); any reset before that, or 180 s without, brings back the previous image. The rollback bootloader marks the image it first boots (USB-flashed) valid.
+- `/info`: version, `elf_sha256` (first 8 bytes of the image's ELF SHA-256, formatted from `app_elf_sha256`; `esp_app_get_elf_sha256` is limited to 9 chars by `CONFIG_APP_RETRIEVE_LEN_ELF_SHA`), mode, partition, OTA state, next slot, uptime, `boot_id` (random per boot), reset reason, internal and PSRAM heap, RSSI, core dump, task list with stack high-water marks.
+- `remote.py upload`: reads the ELF SHA from the image (offset 32 + 144), uploads, waits for a new `boot_id` (uptime comparisons failed in QEMU), then for `ota_state valid`; reports a rollback if the old build comes back. `REMOTE_HTTP_PORT` / `REMOTE_LOG_PORT` redirect it (QEMU tests). An OTA of the 1 MB image takes about 11 s; the whole `pio run -t ota` with the confirmation about 45 s.
+- No authentication: anyone on the network can update the firmware. An image built with another MODE has no OTA: the next update needs USB.
 - The bootloader and the partition table only change with a USB flash.
 
 ## Status screen (`oled.c`, `components/oled`)
 
-- Optional 128x64 I2C OLED: SCL GPIO41, SDA GPIO42 (Kconfig `OLED_*`; GPIO
-  39-42 are the pad JTAG pins, unused while JTAG goes over USB), 400 kHz,
-  internal pull-ups on top of the module's. SSD1306 by default,
-  `CONFIG_OLED_SH1106` for 1.3" modules (column offset 2), `OLED_FLIP` for
-  a module mounted upside down. Address 0x3C, else 0x3D.
-- A task (4 KB stack, priority 2) gathers the state every 250 ms
-  (`airprint_get_activity`: the cached printer status and the running or
-  last job with the page's progress; `scan_service_get_info`; WiFi IP and
-  RSSI), draws it with `oled_ui_render` and sends only the 128-byte pages
-  that changed (page addressing on both controllers).
-- Priority on screen: a scan, a print job, the local test page, a result
-  (printed / scanned / canceled / failed) for 60 s, no printer, a printer
-  problem (paper, jam, cover, ink) as the headline, else READY with the
-  message and ink bars.
-- The bus is probed at boot (0x3C then 0x3D, 3 tries 50 ms apart). No
-  display: logged, the I2C bus deleted (GPIO41/42 released) and no task
-  started, so a screen plugged in later needs a reboot. A display found at
-  boot that stops answering (a failed transfer) is probed again every 5 s.
-- Sleep (burn-in): off after `OLED_SLEEP_MIN` (10) minutes with the same
-  picture (the WiFi bars don't count); any change or a button press turns
-  it on. `oled_wake()` (at press-down) returns true when the screen was
-  asleep: that press is swallowed (no scan, double press or cancel), so a
-  press on a dark screen never starts anything. Without a display it
-  returns false and the buttons work as usual.
+- Optional 128x64 I2C OLED: SCL GPIO41, SDA GPIO42 (Kconfig `OLED_*`; GPIO 39-42 are the pad JTAG pins, unused while JTAG goes over USB), 400 kHz, internal pull-ups on top of the module's. SSD1306 by default, `CONFIG_OLED_SH1106` for 1.3" modules (column offset 2), `OLED_FLIP` for a module mounted upside down. Address 0x3C, else 0x3D.
+- A task (4 KB stack, priority 2) gathers the state every 250 ms (`airprint_get_activity`: the cached printer status and the running or last job with the page's progress; `scan_service_get_info`; WiFi IP and RSSI), draws it with `oled_ui_render` and sends only the 128-byte pages that changed (page addressing on both controllers).
+- Priority on screen: a scan, a print job, the local test page, a result (printed / scanned / canceled / failed) for 60 s, no printer, a printer problem (paper, jam, cover, ink) as the headline, else READY with the message and ink bars.
+- The bus is probed at boot (0x3C then 0x3D, 3 tries 50 ms apart). No display: logged, the I2C bus deleted (GPIO41/42 released) and no task started, so a screen plugged in later needs a reboot. A display found at boot that stops answering (a failed transfer) is probed again every 5 s.
+- Sleep (burn-in): off after `OLED_SLEEP_MIN` (10) minutes with the same picture (the WiFi bars don't count); any change or a button press turns it on. `oled_wake()` (at press-down) returns true when the screen was asleep: that press is swallowed (no scan, double press or cancel), so a press on a dark screen never starts anything. Without a display it returns false and the buttons work as usual.
 
 ## Buttons (`main.c`)
 
-- All active low with the internal pull-up, polled every 10 ms, 30 ms
-  debounce. BOOT (GPIO0) and `PRINT_BUTTON2_GPIO` (GPIO4) are ORed into one
-  button: press = kept A4 150 dpi scan, double press (400 ms) = test page,
-  hold 2 s = cancel the running print or scan.
-- `USER_BUTTON_GPIO` (GPIO5): debounced, wakes the screen, then calls
-  `on_user_button()`, which only logs. Deliberately unassigned, for forks
-  to give it a feature. -1 disables either extra button.
-- GPIO4/5: no strapping, PSRAM, flash or other use (the parked SD card plan
-  uses 9-14).
-- On the board the display answers at 0x3C; the picture is not yet
-  confirmed by eye.
+- All active low with the internal pull-up, polled every 10 ms, 30 ms debounce. BOOT (GPIO0) and `PRINT_BUTTON2_GPIO` (GPIO4) are ORed into one button: press = kept A4 150 dpi scan, double press (400 ms) = test page, hold 2 s = cancel the running print or scan.
+- `USER_BUTTON_GPIO` (GPIO5): debounced, wakes the screen, then calls `on_user_button()`, which only logs. Deliberately unassigned, for forks to give it a feature. -1 disables either extra button.
+- GPIO4/5: no strapping, PSRAM, flash or other use (the parked SD card plan uses 9-14).
+- On the board the display answers at 0x3C; the picture is not yet confirmed by eye.
 
 ## Dev mode (`MODE=dev`)
 
-`airprint_esp.c` swaps the printer hooks for a fake printer: always ready,
-jobs converted and checksummed, the printer data kept in the shared buffer
-(if it fits) and served at `http://<host>/dev/last-job.prn` (decode with
-`tools/bjl_decode.py --png`). Scans come from `fake_scanner` at about USB
-speed (800 KB/s). The USB host still runs.
+`airprint_esp.c` swaps the printer hooks for a fake printer: always ready, jobs converted and checksummed, the printer data kept in the shared buffer (if it fits) and served at `http://<host>/dev/last-job.prn` (decode with `tools/bjl_decode.py --png`). Scans come from `fake_scanner` at about USB speed (800 KB/s). The USB host still runs.
 
 ## Performance and memory (ESP32-S3 @ 240 MHz)
 
-- Printing an A4 page: 300 dpi about 2.2 s, 600 dpi about 8 s (text) or 9 s
-  (photo). The MG2500 needs 7.5 s or more per page. Each job logs its time
-  split (network / output / render / decode) and the CPU cycles per render
-  stage.
+- Printing an A4 page: 300 dpi about 2.2 s, 600 dpi about 8 s (text) or 9 s (photo). The MG2500 needs 7.5 s or more per page. Each job logs its time split (network / output / render / decode) and the CPU cycles per render stage.
 - What mattered for printing, in order:
   1. Pass white lines as `NULL` from the decoder and fill runs in bulk.
-  2. A tight white-skipping loop, with the CMYK conversion `noinline`. At
-     `-O2` GCC hoisted the conversion above the white test and spilled
-     registers, costing about 50 cycles per white pixel.
-  3. Skip dithering inks that have no coverage, skip all-zero groups of
-     8 pixels, and dither only the inked span.
-  4. `-O2` (ESP-IDF defaults to `-Og`), IRAM for hot functions (`BJL_HOT`),
-     32 KB instruction / 64 KB data caches, QIO flash. Small gains each.
-- Scanning: 150 dpi A4 in 15 s; higher resolutions are limited by full-speed
-  USB (raw RGB: 300 dpi A4 is 26 MB, roughly 0.5-1 MB/s expected); the
-  encoder costs about 2 s per 150 dpi page.
-- Memory on the board (debug mode, printer attached, idle): internal 92 KB
-  free (48 KB largest block), PSRAM 573 KB free after the 7.5 MB shared
-  buffer. Per-line print buffers come from internal RAM
-  (`BJL_MALLOC_FAST`), Canon block buffers from PSRAM (`BJL_MALLOC_BULK`).
-  The lowest free internal RAM seen during a 600 dpi job is about 67 KB. A
-  scan adds 12 KB of USB transfers, about 20 KB of protocol buffers and an
-  8 KB thread stack in internal RAM, and the encoder strip (60 KB at 300 dpi,
-  120 KB at 600 dpi) in PSRAM. IPP connection threads have 12 KB stacks and
-  use about 3.5 KB.
-- The print conversion loop and the scan thread yield every 64 lines
-  (`vTaskDelay(1)`). Without that, the task watchdog fires.
+  2. A tight white-skipping loop, with the CMYK conversion `noinline`. At `-O2` GCC hoisted the conversion above the white test and spilled registers, costing about 50 cycles per white pixel.
+  3. Skip dithering inks that have no coverage, skip all-zero groups of 8 pixels, and dither only the inked span.
+  4. `-O2` (ESP-IDF defaults to `-Og`), IRAM for hot functions (`BJL_HOT`), 32 KB instruction / 64 KB data caches, QIO flash. Small gains each.
+- Scanning: 150 dpi A4 in 15 s; higher resolutions are limited by full-speed USB (raw RGB: 300 dpi A4 is 26 MB, roughly 0.5-1 MB/s expected); the encoder costs about 2 s per 150 dpi page.
+- Memory on the board (debug mode, printer attached, idle): internal 92 KB free (48 KB largest block), PSRAM 573 KB free after the 7.5 MB shared buffer. Per-line print buffers come from internal RAM (`BJL_MALLOC_FAST`), Canon block buffers from PSRAM (`BJL_MALLOC_BULK`). The lowest free internal RAM seen during a 600 dpi job is about 67 KB. A scan adds 12 KB of USB transfers, about 20 KB of protocol buffers and an 8 KB thread stack in internal RAM, and the encoder strip (60 KB at 300 dpi, 120 KB at 600 dpi) in PSRAM. IPP connection threads have 12 KB stacks and use about 3.5 KB.
+- The print conversion loop and the scan thread yield every 64 lines (`vTaskDelay(1)`). Without that, the task watchdog fires.
 
 ## Gotchas
 
-- QEMU cannot emulate octal PSRAM; `CONFIG_SPIRAM_IGNORE_NOTFOUND=y` lets
-  the firmware boot without it. So in QEMU everything is internal RAM: its
-  scan buffer is 48 KB (176 KB starved the emulated Ethernet during the
-  600 dpi print test: "no mem for receive buffer"), and a kept 150 dpi scan
-  does not fit there.
-- QEMU does not emulate the quad I/O read command: with QIO, direct flash
-  reads (`esp_partition_read`: OTA image check, core dump) return garbage
-  while mmap reads work. The qemu env builds with DIO
-  (`sdkconfig.defaults.qemu`); the board keeps QIO.
-- PlatformIO's `board_build.flash_mode` only affects the uploader. QIO is
-  set by `CONFIG_ESPTOOLPY_FLASHMODE_QIO` (the header still reads "dio",
-  which is expected on the S3).
-- Symbol clash: the WiFi blob exports `scan_cancel` (and friends), so the
-  scan service's API is prefixed `scan_service_`.
-- Sockets: `CONFIG_LWIP_MAX_SOCKETS=28` covers IPP (8 connections + 2
-  listeners), mDNS, SNTP, the debug server (3 + listener + control), the
-  log stream (listener + client) and 4 event listeners, with a little room.
-- The ESP-IDF WiFi driver logs the SSID at info level. Its log level is set
-  to warn so the network name doesn't end up in logs.
-- The app partitions start at `0x20000` (OTA layout); the bootloader with
-  rollback is 22.6 KB (limit 32 KB before the partition table at 0x8000).
-- A serial port can only be opened by one program: a log reader from another
-  session blocked a USB flash ("device reports readiness to read but
-  returned no data").
-- Shell (zsh) traps when scripting: unmatched globs abort the command
-  (`setopt null_glob`), there is no `timeout`, `log` is a builtin, `$VAR`
-  holding a command with arguments is not split, and macOS `sed` has no
-  `\b` (use perl).
+- QEMU cannot emulate octal PSRAM; `CONFIG_SPIRAM_IGNORE_NOTFOUND=y` lets the firmware boot without it. So in QEMU everything is internal RAM: its scan buffer is 48 KB (176 KB starved the emulated Ethernet during the 600 dpi print test: "no mem for receive buffer"), and a kept 150 dpi scan does not fit there.
+- QEMU does not emulate the quad I/O read command: with QIO, direct flash reads (`esp_partition_read`: OTA image check, core dump) return garbage while mmap reads work. The qemu env builds with DIO (`sdkconfig.defaults.qemu`); the board keeps QIO.
+- PlatformIO's `board_build.flash_mode` only affects the uploader. QIO is set by `CONFIG_ESPTOOLPY_FLASHMODE_QIO` (the header still reads "dio", which is expected on the S3).
+- Symbol clash: the WiFi blob exports `scan_cancel` (and friends), so the scan service's API is prefixed `scan_service_`.
+- Sockets: `CONFIG_LWIP_MAX_SOCKETS=28` covers IPP (8 connections + 2 listeners), mDNS, SNTP, the debug server (3 + listener + control), the log stream (listener + client) and 4 event listeners, with a little room.
+- The ESP-IDF WiFi driver logs the SSID at info level. Its log level is set to warn so the network name doesn't end up in logs.
+- The app partitions start at `0x20000` (OTA layout); the bootloader with rollback is 22.6 KB (limit 32 KB before the partition table at 0x8000).
+- A serial port can only be opened by one program: a log reader from another session blocked a USB flash ("device reports readiness to read but returned no data").
+- Shell (zsh) traps when scripting: unmatched globs abort the command (`setopt null_glob`), there is no `timeout`, `log` is a builtin, `$VAR` holding a command with arguments is not split, and macOS `sed` has no `\b` (use perl).
 
 ## Investigated and parked
 
-- AirDrop from the board (ESP32Drop, https://github.com/s-iwaki-d/ESP32Drop,
-  0BSD): a working AWDL + AirDrop implementation for ESP32-S3 with PSRAM,
-  mostly ESP-IDF code (Arduino only in the BLE part). It can list nearby AWDL
-  peers with an average RSSI and leaves the choice to the caller (its example
-  takes the strongest above -30 dBm, "phone in hand"; -43 across the room).
-  Against it here: AWDL cannot share the radio with the WiFi station (and
-  the router is on another channel than AWDL (6)), so every send takes the board off
-  the network for 30-60 s; BLE wake-up needs about 26 KB of internal RAM and
-  TLS two 16.6 KB contiguous internal blocks; only files under 128 KiB are
-  confirmed to reach an iPhone (our 150 dpi scan is about 390 KB); receivers
-  must be in "Everyone" mode and see a preview, and the receiver's name is
-  not decoded yet. The user chose the web page for the iPhone instead.
+- AirDrop from the board (ESP32Drop, https://github.com/s-iwaki-d/ESP32Drop, 0BSD): a working AWDL + AirDrop implementation for ESP32-S3 with PSRAM, mostly ESP-IDF code (Arduino only in the BLE part). It can list nearby AWDL peers with an average RSSI and leaves the choice to the caller (its example takes the strongest above -30 dBm, "phone in hand"; -43 across the room). Against it here: AWDL cannot share the radio with the WiFi station (and the router is on another channel than AWDL (6)), so every send takes the board off the network for 30-60 s; BLE wake-up needs about 26 KB of internal RAM and TLS two 16.6 KB contiguous internal blocks; only files under 128 KiB are confirmed to reach an iPhone (our 150 dpi scan is about 390 KB); receivers must be in "Everyone" mode and see a preview, and the receiver's name is not decoded yet. The user chose the web page for the iPhone instead.
 
 ## Limitations and ideas
 
-- Printing: plain paper only (no photo media, no borderless). A4/Letter
-  only. No copies (clients repeat the pages), no duplex, no JPEG/PDF over
-  IPP (the web UI renders PDFs and pictures itself), no gzip, no IPPS, no
-  authentication, IPv4 only. WiFi settings are compiled
-  in. The colour tuning (dot gain 0.25 CMY / 0.15 K, full black generation)
-  has not been checked on paper yet.
-- Scanning: colour JPEG only, platen only, one page per eSCL job. Paper
-  comes out light grey (gamma 2.2, no white point correction): stretching
-  the levels so paper maps to white would make documents cleaner.
-- Web UI: printing a photo at 600 dpi sends about 10 MB per page, and a page
-  only starts printing once all pages are rendered (one request). Deskew,
-  multi-page PDF scans and "scan to Process" are not there; pdf.js gets no
-  CMaps or wasm decoders (rare CJK fonts without embedding and JPEG 2000
-  images will not render).
-- Ideas: white point correction; PDF output for eSCL (a JPEG wrapped in a
-  one-page PDF); IPv6 (faster `.local` resolution on macOS; AirSane notes
-  macOS can need it); a token for OTA; the scanner's own JPEG mode (less USB
-  traffic, untried on the flatbed); reading the scanner's interrupt endpoint
-  for the printer's buttons; finishing the iPhone web flow; buffering
-  converted pages in PSRAM so print clients can disconnect early; an SD card
-  for large spools (pinout in `docs/sd_card_pinout.png`).
+- Printing: plain paper only (no photo media, no borderless). A4/Letter only. No copies (clients repeat the pages), no duplex, no JPEG/PDF over IPP (the web UI renders PDFs and pictures itself), no gzip, no IPPS, no authentication, IPv4 only. WiFi settings are compiled in. The colour tuning (dot gain 0.25 CMY / 0.15 K, full black generation) has not been checked on paper yet.
+- Scanning: colour JPEG only, platen only, one page per eSCL job. Paper comes out light grey (gamma 2.2, no white point correction): stretching the levels so paper maps to white would make documents cleaner.
+- Web UI: printing a photo at 600 dpi sends about 10 MB per page, and a page only starts printing once all pages are rendered (one request). Deskew, multi-page PDF scans and "scan to Process" are not there; pdf.js gets no CMaps or wasm decoders (rare CJK fonts without embedding and JPEG 2000 images will not render).
+- Ideas: white point correction; PDF output for eSCL (a JPEG wrapped in a one-page PDF); IPv6 (faster `.local` resolution on macOS; AirSane notes macOS can need it); a token for OTA; the scanner's own JPEG mode (less USB traffic, untried on the flatbed); reading the scanner's interrupt endpoint for the printer's buttons; finishing the iPhone web flow; buffering converted pages in PSRAM so print clients can disconnect early; an SD card for large spools (pinout in `docs/sd_card_pinout.png`).

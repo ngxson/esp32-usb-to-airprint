@@ -5,7 +5,7 @@ CFLAGS += -ffp-contract=off
 BJL = ../components/canon_bjl/canon_bjl.c ../components/canon_bjl/testpage.c ../components/canon_bjl/bjl_render.c
 AIRPRINT = ../components/airprint/airprint.c ../components/airprint/ipp.c ../components/airprint/raster.c \
            ../components/airprint/events.c ../components/airprint/printer_driver.c
-PRINTERS = ../components/printers/printers.c ../components/printers/canon_mg2500.c
+PRINTERS = ../components/printers/printers.c ../components/printers/canon_pixma.c
 WEBUI = ../components/webui/webui.c ../components/webui/web_assets.c
 SCAN_CORE = ../components/scanner/pixma_scan.c ../components/scanner/jpeg_enc.c ../components/scanner/fake_scanner.c
 SCANNER = $(SCAN_CORE) ../components/scanner/shared_buf.c ../components/scanner/scan_service.c

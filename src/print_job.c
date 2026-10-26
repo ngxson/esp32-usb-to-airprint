@@ -19,7 +19,7 @@ static const char *TAG = "print_job";
 #define TEST_PAGE_DPI 600
 #endif
 
-const printer_driver_t *print_job_driver(void)
+static const printer_driver_t *configured_driver(void)
 {
     static const printer_driver_t *d;
     if (!d) {
@@ -32,6 +32,28 @@ const printer_driver_t *print_job_driver(void)
     return d;
 }
 
+// the driver of the last printer plugged in, NULL if it had none
+static const printer_driver_t *volatile s_attached;
+
+const printer_driver_t *print_job_driver(void)
+{
+    const printer_driver_t *d = s_attached;
+    return d ? d : configured_driver();
+}
+
+bool print_job_set_printer(const usb_printer_info_t *info)
+{
+    const printer_driver_t *before = print_job_driver();
+    const printer_driver_t *d = printer_driver_match(info->vid, info->pid, info->device_id);
+    s_attached = d;
+    if (d)
+        ESP_LOGI(TAG, "printer %04x:%04x: driver %s (%s)", info->vid, info->pid, d->id, d->make_model);
+    else
+        ESP_LOGW(TAG, "printer %04x:%04x \"%s\" is not a model the firmware knows: using the \"%s\" driver anyway",
+                 info->vid, info->pid, info->product, print_job_driver()->id);
+    return print_job_driver() != before;
+}
+
 int print_job_default_dpi(void)
 {
     return printer_driver_has_dpi(print_job_driver(), TEST_PAGE_DPI) ? TEST_PAGE_DPI
@@ -40,13 +62,19 @@ int print_job_default_dpi(void)
 
 // Canon's driver waits for each IVEC response; Gutenprint does not wait at
 // all. Wait a bit, but carry on either way. The end of the job is answered
-// once the page is out (which keeps the job "processing" until then).
+// once the page is out (which keeps the job "processing" until then), by a
+// printer that answered the start of the job: one that did not (a model whose
+// back channel we do not know) is not waited for for minutes.
 int print_job_sync(const char *what)
 {
+    static bool s_start_answered;
     if (usb_printer_flush() != ESP_OK)
         return -1;
-    uint32_t timeout = strcmp(what, "EndJob") == 0 ? 180000 : 5000;
+    bool end = strcmp(what, "EndJob") == 0;
+    uint32_t timeout = !end ? 5000 : s_start_answered ? 180000 : 5000;
     esp_err_t err = usb_printer_wait_response(what, timeout);
+    if (strcmp(what, "StartJob") == 0)
+        s_start_answered = err == ESP_OK;
     if (err == ESP_OK)
         ESP_LOGI(TAG, "%s acknowledged", what);
     else if (err == ESP_ERR_TIMEOUT)
@@ -129,7 +157,7 @@ esp_err_t print_job_test_page(bool dry_run, int dpi, print_stats_t *stats)
              (unsigned long)esp_get_free_heap_size());
     test_out_t out = {.dry_run = dry_run};
     printer_io_t io = {.write = test_write, .sync = dry_run ? NULL : test_sync, .progress = test_progress, .ctx = &out};
-    err = d->test_page(&io, dpi, label) == 0 ? ESP_OK : ESP_FAIL;
+    err = d->test_page(d, &io, dpi, label) == 0 ? ESP_OK : ESP_FAIL;
     if (!dry_run) {
         if (err != ESP_OK && usb_printer_connected())
             ESP_LOGW(TAG, "job aborted, resetting printer");

@@ -8,7 +8,10 @@ block when the page height is a multiple of 8 (print-canon.c
 canon_write_multiraster never flushes it), so our stream may carry extra
 trailing all-blank ESC (F blocks.
 
-usage: compare_gutenprint.py ref.prn <300|600> [--paper a4|letter] [--host host/bjl_host]
+usage: compare_gutenprint.py ref.prn <300|600> [--paper a4|letter] [--model MG2400] [--host host/bjl_host]
+
+--model: the canon_bjl.h stream variant to encode with (the reference must
+come from a Gutenprint model that uses it, see tools/gutenprint_ref/build_ref.sh).
 """
 import argparse
 import os
@@ -27,6 +30,7 @@ def main():
     ap.add_argument("ref")
     ap.add_argument("dpi", type=int)
     ap.add_argument("--paper", default="a4", choices=["a4", "letter"])
+    ap.add_argument("--model", default="MG2400")
     ap.add_argument("--host", default=os.path.join(os.path.dirname(__file__), "..", "host", "bjl_host"))
     args = ap.parse_args()
 
@@ -48,7 +52,8 @@ def main():
                         f.write(row + bytes(line_bytes[c] - len(row)))
             raws.append(raw)
         out = os.path.join(td, "ours.prn")
-        subprocess.run([args.host, "encode", str(args.dpi), args.paper, out] + raws, check=True)
+        subprocess.run([args.host, "encode", "--model", args.model, str(args.dpi), args.paper, out] + raws,
+                       check=True, stdout=subprocess.DEVNULL)
         ours = open(out, "rb").read()
 
     a = Decoder(ref, verbose=False).run().cmds

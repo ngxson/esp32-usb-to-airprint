@@ -1,7 +1,9 @@
 #!/bin/bash
 # Builds Gutenprint 5.3.5 (core library only) and renders the reference
-# streams for the MG2500 series that tools/compare_gutenprint.py checks
-# against: build/ref300.prn and build/ref600.prn.
+# streams that tools/compare_gutenprint.py checks against: for the MG2500
+# series build/ref300.prn, ref600.prn, ref300_letter.prn, ref300_2pages.prn,
+# and the same set for a Gutenprint model of each other canon_bjl.h stream
+# variant: build/<variant>/ref*.prn.
 set -euo pipefail
 cd "$(dirname "$0")"
 mkdir -p build && cd build
@@ -22,3 +24,15 @@ STP_DATA_PATH=$GP/src/xml ./gp_ref 600x600dpi ref600.prn
 STP_DATA_PATH=$GP/src/xml ./gp_ref 300x300dpi ref300_letter.prn Letter
 STP_DATA_PATH=$GP/src/xml ./gp_ref 300x300dpi ref300_2pages.prn A4 2
 ls -la ref*.prn
+# canon_bjl.h model -> a Gutenprint driver using that stream
+for m in MG2900:bjc-MG2900-series iP2800:bjc-iP2800-series E3100:bjc-E3100-series MP230:bjc-MULTIPASS-MP230 \
+         iP2700:bjc-PIXMA-iP2700; do
+    mkdir -p ${m%%:*}
+    export GP_DRIVER=${m#*:}
+    STP_DATA_PATH=$GP/src/xml ./gp_ref 300x300dpi ${m%%:*}/ref300.prn 2>/dev/null
+    STP_DATA_PATH=$GP/src/xml ./gp_ref 600x600dpi ${m%%:*}/ref600.prn 2>/dev/null
+    STP_DATA_PATH=$GP/src/xml ./gp_ref 300x300dpi ${m%%:*}/ref300_letter.prn Letter 2>/dev/null
+    STP_DATA_PATH=$GP/src/xml ./gp_ref 300x300dpi ${m%%:*}/ref300_2pages.prn A4 2 2>/dev/null
+    unset GP_DRIVER
+done
+ls -la */ref*.prn

@@ -1,9 +1,10 @@
 // Host-side harness for components/canon_bjl (built with plain cc, no IDF).
 //
 //   bjl_host testpage <300|600> out.prn     render the firmware's test page job
-//   bjl_host encode <300|600> <a4|letter> out.prn page1.raw [page2.raw ...]
+//   bjl_host encode [--model MG2900] <300|600> <a4|letter> out.prn page1.raw [page2.raw ...]
 //                                           encode raw planes (per line: C,M,Y,K
-//                                           line_bytes each), one file per page
+//                                           line_bytes each), one file per page,
+//                                           for a model of canon_bjl.h (default MG2400)
 //   bjl_host selftest                       PackBits / framing unit tests, and the
 //                                           printer drivers' test pages against testpage
 #include <stdio.h>
@@ -57,7 +58,7 @@ static int cmd_testpage(bjl_mode_id_t mode, const char *out_path)
         return 1;
     bjl_job_t job;
     testpage_t tp;
-    if (bjl_job_init(&job, mode, BJL_PAPER_A4, file_crc_sink, &o))
+    if (bjl_job_init(&job, BJL_MODEL_MG2400, mode, BJL_PAPER_A4, file_crc_sink, &o))
         return 1;
     char info1[64];
     testpage_format_mode(&job, info1, sizeof(info1));
@@ -81,14 +82,14 @@ static int cmd_testpage(bjl_mode_id_t mode, const char *out_path)
     return err != 0;
 }
 
-static int cmd_encode(bjl_mode_id_t mode, bjl_paper_id_t paper, const char *out_path, int npages,
-                      char **pages)
+static int cmd_encode(bjl_model_id_t model, bjl_mode_id_t mode, bjl_paper_id_t paper, const char *out_path,
+                      int npages, char **pages)
 {
     FILE *out = fopen(out_path, "wb");
     if (!out)
         return 1;
     bjl_job_t job;
-    if (bjl_job_init(&job, mode, paper, file_sink, out))
+    if (bjl_job_init(&job, model, mode, paper, file_sink, out))
         return 1;
     uint8_t *buf[4];
     for (int c = 0; c < 4; c++)
@@ -246,7 +247,7 @@ static int cmd_selftest(void)
     for (int m = 0; m < BJL_MODE_COUNT; m++) {
         mem_t mem = {0};
         bjl_job_t job;
-        CHECK(bjl_job_init(&job, m, BJL_PAPER_A4, mem_sink, &mem) == 0, "init");
+        CHECK(bjl_job_init(&job, BJL_MODEL_MG2400, m, BJL_PAPER_A4, mem_sink, &mem) == 0, "init");
         bjl_page_begin(&job);
         for (int y = 0; y < 13; y++)            // partial: 1 full block + 5 lines
             bjl_page_add_line(&job, NULL);
@@ -267,7 +268,7 @@ static int cmd_selftest(void)
     {
         int budget = 800;     // XML wrapper is 680 bytes, page header ~190
         bjl_job_t job;
-        bjl_job_init(&job, BJL_MODE_300DPI, BJL_PAPER_A4, fail_sink, &budget);
+        bjl_job_init(&job, BJL_MODEL_MG2400, BJL_MODE_300DPI, BJL_PAPER_A4, fail_sink, &budget);
         bjl_emit_start_job(&job);
         bjl_emit_mode_shift(&job);
         int r = bjl_page_begin(&job);
@@ -277,18 +278,20 @@ static int cmd_selftest(void)
         bjl_job_free(&job);
     }
 
-    // the Canon driver's test page (what the firmware's button prints) is
-    // the stream of the test page job above, byte for byte
-    {
-        const printer_driver_t *d = printer_driver_find("canon-mg2500");
-        CHECK(d && d->test_page, "canon-mg2500 driver");
-        for (int i = 0; d && i < d->nresolutions; i++) {
+    // each Canon driver's test page (what the firmware's button prints) is
+    // the stream of the test page job above for its model, byte for byte
+    CHECK(printer_driver_find("canon-mg2500"), "canon-mg2500 driver");
+    for (int k = 0; printer_drivers[k]; k++) {
+        const printer_driver_t *d = printer_drivers[k];
+        CHECK(d->test_page && d->model, "%s: test page", d->id);
+        for (int i = 0; d->test_page && d->model && i < d->nresolutions; i++) {
             int dpi = d->resolutions[i];
             uint32_t want = 0, got = 0;
             bjl_job_t job;
             testpage_t tp;
             char info1[64];
-            bjl_job_init(&job, parse_mode(dpi == 600 ? "600" : "300"), BJL_PAPER_A4, crc_sink, &want);
+            bjl_job_init(&job, *(const bjl_model_id_t *)d->model, parse_mode(dpi == 600 ? "600" : "300"),
+                         BJL_PAPER_A4, crc_sink, &want);
             testpage_format_mode(&job, info1, sizeof(info1));
             testpage_init(&tp, &job, info1, TESTPAGE_DRYRUN_INFO);
             bjl_emit_start_job(&job);
@@ -301,9 +304,45 @@ static int cmd_selftest(void)
             testpage_free(&tp);
             bjl_job_free(&job);
             printer_io_t io = {.write = crc_write, .ctx = &got};
-            CHECK(d->test_page(&io, dpi, TESTPAGE_DRYRUN_INFO) == 0, "driver test page %d dpi", dpi);
-            CHECK(got == want, "driver test page %d dpi: crc32 %08x, expected %08x", dpi, (unsigned)got,
+            CHECK(d->test_page(d, &io, dpi, TESTPAGE_DRYRUN_INFO) == 0, "%s: test page %d dpi", d->id, dpi);
+            CHECK(got == want, "%s: test page %d dpi: crc32 %08x, expected %08x", d->id, dpi, (unsigned)got,
                   (unsigned)want);
+        }
+    }
+
+    // the firmware's choice of driver for the attached printer
+    {
+        static const struct {
+            uint16_t vid, pid;
+            const char *device_id, *want;
+        } cases[] = {
+            {0x04a9, 0x176d, "MFG:Canon;CMD:BJL,BJRaster3,BSCCe,IVEC,IVECPLI;MDL:MG2500 series;CLS:PRINTER;",
+             "canon-mg2500"},
+            {0x04a9, 0x1746, "", "canon-mp280"},                              // by USB id
+            {0x04a9, 0x1234, "MFG:Canon;MDL:iP2700 series;", "canon-ip2700"},  // by model name
+            {0x04a9, 0x1234, "MANUFACTURER:Canon;MODEL:iP2800 series;", "canon-ip2800"},
+            {0x04a9, 0x1234, "MFG:Canon;MDL:P200;", "canon-p200"},            // " series" optional
+            {0x04a9, 0x1234, "MFG:Canon; MDL:mg2900 Series;", "canon-mg2900"},
+            {0x04a9, 0x1234, "MFG:Canon;MDL:MG3600 series;", NULL},           // not supported
+            {0x03f0, 0x1234, "MFG:HP;MDL:iP2700 series;", NULL},              // another maker
+            {0x04a9, 0x1234, "MFG:Canon;MDL:iP2700 series XL;", NULL},
+            {0x04a9, 0x1234, "", NULL},
+        };
+        for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
+            const printer_driver_t *d = printer_driver_match(cases[i].vid, cases[i].pid, cases[i].device_id);
+            const char *got = d ? d->id : NULL;
+            CHECK(cases[i].want ? got && !strcmp(got, cases[i].want) : !got, "match %04x:%04x \"%s\": %s, expected %s",
+                  cases[i].vid, cases[i].pid, cases[i].device_id, got ? got : "none",
+                  cases[i].want ? cases[i].want : "none");
+        }
+        // every driver is found by its own USB id and by its own model name
+        for (int k = 0; printer_drivers[k]; k++) {
+            const printer_driver_t *d = printer_drivers[k];
+            char id[96];
+            snprintf(id, sizeof(id), "MFG:%s;MDL:%s;", d->usb_mfg, d->usb_mdl);
+            CHECK(printer_driver_match(0, 0, id) == d, "%s: match by \"%s\"", d->id, id);
+            if (d->usb_vid)
+                CHECK(printer_driver_match(d->usb_vid, d->usb_pid, "") == d, "%s: match by USB id", d->id);
         }
     }
 
@@ -315,12 +354,26 @@ int main(int argc, char **argv)
 {
     if (argc >= 4 && !strcmp(argv[1], "testpage"))
         return cmd_testpage(parse_mode(argv[2]), argv[3]);
-    if (argc >= 6 && !strcmp(argv[1], "encode"))
-        return cmd_encode(parse_mode(argv[2]), !strcmp(argv[3], "letter") ? BJL_PAPER_LETTER : BJL_PAPER_A4, argv[4],
-                          argc - 5, argv + 5);
+    if (argc >= 2 && !strcmp(argv[1], "encode")) {
+        bjl_model_id_t model = BJL_MODEL_MG2400;
+        if (argc >= 4 && !strcmp(argv[2], "--model")) {
+            model = bjl_find_model(argv[3]);
+            if (model == BJL_MODEL_COUNT) {
+                fprintf(stderr, "unknown model %s\n", argv[3]);
+                return 2;
+            }
+            argc -= 2;
+            argv += 2;
+        }
+        if (argc >= 6)
+            return cmd_encode(model, parse_mode(argv[2]), !strcmp(argv[3], "letter") ? BJL_PAPER_LETTER : BJL_PAPER_A4,
+                              argv[4], argc - 5, argv + 5);
+    }
     if (argc >= 2 && !strcmp(argv[1], "selftest"))
         return cmd_selftest();
-    fprintf(stderr, "usage: %s testpage <300|600> out.prn | encode <300|600> <a4|letter> out.prn page.raw... | selftest\n",
+    fprintf(stderr,
+            "usage: %s testpage <300|600> out.prn | encode [--model MG2400] <300|600> <a4|letter> out.prn page.raw... "
+            "| selftest\n",
             argv[0]);
     return 2;
 }

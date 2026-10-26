@@ -541,8 +541,6 @@ static void open_device(uint8_t addr)
 
     if (info.vid != CANON_VID)
         ESP_LOGW(TAG, "not a Canon printer: Canon raster jobs will print garbage on it");
-    else if (info.pid != CANON_MG2500_PID)
-        ESP_LOGW(TAG, "Canon printer but not the MG2500 series (pid %04x): untested", info.pid);
 
     xSemaphoreTake(s_p.lock, portMAX_DELAY);
     s_p.info = info;

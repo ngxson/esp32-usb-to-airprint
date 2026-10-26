@@ -107,6 +107,16 @@ class Decoder:
                 self.log("@%06x XML %s%s" % (self.p, op, extra))
                 self.cmds.append(("XML", op + extra))
                 self.p = end
+            elif d.startswith(b"BJLSTART\n", self.p):
+                # BJL control block after ESC [K 00 1f (iP2700 and others)
+                end = d.find(b"BJLEND\n", self.p)
+                if end < 0:
+                    raise DecodeError("unterminated BJL block at %d" % self.p)
+                end += len(b"BJLEND\n")
+                text = d[self.p:end].decode()
+                self.log("@%06x BJL %s" % (self.p, text.strip().replace("\n", "; ")))
+                self.cmds.append(("BJL", text))
+                self.p = end
             elif b == 0x1B:
                 self.esc()
             elif b == 0x0C:
@@ -151,7 +161,7 @@ class Decoder:
 
     # --- header commands -------------------------------------------------
     def cmd_sq_K(self, a):
-        return "reset printer"
+        return "BJL control block follows" if a[-1:] == b"\x1f" else "reset printer"
 
     def cmd_b(self, a):
         self.state["compression"] = a[0]
@@ -195,6 +205,9 @@ class Decoder:
 
     def cmd_l(self, a):
         return "tray/media"
+
+    def cmd_w(self, a):
+        return "media %02x" % a[0]
 
     def cmd_v(self, a):
         return "page orientation %d" % a[0]

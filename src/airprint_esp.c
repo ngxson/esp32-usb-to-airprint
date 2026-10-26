@@ -13,6 +13,7 @@
 #include "events.h"
 #include "fake_scanner.h"
 #include "freertos/FreeRTOS.h"
+#include "freertos/semphr.h"
 #include "freertos/task.h"
 #include "local_config.h"
 #include "mdns.h"
@@ -32,6 +33,10 @@ static const char *TAG = "airprint_esp";
 
 static airprint_config_t s_cfg;
 static char s_uuid[40];
+static char s_hostname[64];
+static SemaphoreHandle_t s_identity_lock;   // the announced model (airprint_esp_driver_changed)
+static char s_device_id[2][128];            // the current one and the one before (still being read)
+static int s_device_id_cur;
 static void (*s_on_job_state)(bool);
 static esp_timer_handle_t s_cancel_timer;
 static volatile bool s_job_running;
@@ -320,14 +325,10 @@ static void alloc_shared_buf(void)
 
 // ---------------------------------------------------------------------------
 
-static esp_err_t start_mdns(const char *hostname)
+// The printer and scanner services of the current driver
+static esp_err_t announce(const char *hostname)
 {
-    esp_err_t err = mdns_init();
-    if (err != ESP_OK)
-        return err;
-    mdns_hostname_set(hostname);
-    mdns_instance_name_set(PRINTER_NAME);
-
+    esp_err_t err;
     const printer_driver_t *drv = s_cfg.driver;
     char adminurl[96], product[64], urf[64];
     snprintf(adminurl, sizeof(adminurl), "http://%s.local/", hostname);
@@ -395,6 +396,46 @@ static esp_err_t start_mdns(const char *hostname)
     return ESP_OK;
 }
 
+static esp_err_t start_mdns(const char *hostname)
+{
+    esp_err_t err = mdns_init();
+    if (err != ESP_OK)
+        return err;
+    mdns_hostname_set(hostname);
+    mdns_instance_name_set(PRINTER_NAME);
+    return announce(hostname);
+}
+
+// What IPP, eSCL and mDNS say the printer is. Other tasks read these while
+// they change: each pointer is written whole, and the device id that was
+// replaced stays valid until the next change.
+static void set_identity(const printer_driver_t *drv)
+{
+    int i = s_device_id_cur ^ 1;
+    snprintf(s_device_id[i], sizeof(s_device_id[i]), "MFG:%s;MDL:%s;CMD:URF,PWG;CLS:PRINTER;", drv->usb_mfg,
+             drv->usb_mdl);
+    s_device_id_cur = i;
+    s_cfg.device_id = s_device_id[i];
+    s_cfg.make_model = drv->make_model;
+    s_scan_cfg.make_model = drv->make_model;
+    s_cfg.driver = drv;
+}
+
+void airprint_esp_driver_changed(void)
+{
+    if (!s_identity_lock)
+        return;     // not started: airprint_esp_start takes the driver as it is then
+    xSemaphoreTake(s_identity_lock, portMAX_DELAY);
+    const printer_driver_t *drv = print_job_driver();
+    if (s_cfg.driver && drv != s_cfg.driver) {
+        ESP_LOGI(TAG, "printer model changed: %s -> %s", s_cfg.driver->make_model, drv->make_model);
+        set_identity(drv);
+        mdns_service_remove_all();
+        announce(s_hostname);
+    }
+    xSemaphoreGive(s_identity_lock);
+}
+
 esp_err_t airprint_esp_start(const char *hostname, void (*on_job_state)(bool printing))
 {
     s_on_job_state = on_job_state;
@@ -408,15 +449,11 @@ esp_err_t airprint_esp_start(const char *hostname, void (*on_job_state)(bool pri
     esp_timer_create(&targs, &s_cancel_timer);
 
     const printer_driver_t *drv = print_job_driver();
-    static char device_id[128];
-    snprintf(device_id, sizeof(device_id), "MFG:%s;MDL:%s;CMD:URF,PWG;CLS:PRINTER;", drv->usb_mfg, drv->usb_mdl);
     ESP_LOGI(TAG, "printer driver: %s (%s)", drv->id, drv->make_model);
+    snprintf(s_hostname, sizeof(s_hostname), "%s", hostname);
     s_cfg = (airprint_config_t){
         .name = PRINTER_NAME,
-        .make_model = drv->make_model,
         .uuid = s_uuid,
-        .device_id = device_id,
-        .driver = drv,
         .port = IPP_PORT,
         .web_port = WEB_PORT,
         .get_status = get_status,
@@ -435,9 +472,9 @@ esp_err_t airprint_esp_start(const char *hostname, void (*on_job_state)(bool pri
         .close = scan_close,
         .io = {.write = scan_write, .read = scan_read, .sleep_ms = scan_sleep},
         .state = job_state,
-        .make_model = drv->make_model,
         .uuid = s_uuid,
     };
+    set_identity(drv);
     s_cfg.http_handler = http_handler;
     s_cfg.home_html = SCAN_HOME_HTML;
     if (strcmp(MODE, "dev") == 0) {
@@ -462,5 +499,10 @@ esp_err_t airprint_esp_start(const char *hostname, void (*on_job_state)(bool pri
     events_add_source("scan", scan_service_status_json, NULL);
     if (airprint_start(&s_cfg) != 0 || events_start() != 0)
         return ESP_FAIL;
-    return start_mdns(hostname);
+    esp_err_t err = start_mdns(hostname);
+    // from now on a printer of another model changes what is announced; one
+    // plugged in while this started is caught up here
+    s_identity_lock = xSemaphoreCreateMutex();
+    airprint_esp_driver_changed();
+    return err;
 }

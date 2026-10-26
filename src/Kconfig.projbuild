@@ -4,14 +4,16 @@ menu "Printer server"
         string "Printer driver"
         default "canon-mg2500"
         help
-            The id of the printer model the firmware drives, from
-            components/printers/printers.c.
+            The id of the printer model the firmware drives until a printer
+            is plugged in, and for a printer it does not recognise, from
+            components/printers/printers.c. A recognised printer (USB id or
+            IEEE 1284 model name) uses its own driver.
 
     choice PRINTER_RESOLUTION
         prompt "Test page resolution"
         default PRINTER_RES_600
         help
-            Canon MG2500 plain-paper print mode used for the test page.
+            Canon plain-paper print mode used for the test page.
         config PRINTER_RES_300
             bool "300x300 dpi (fast, CMYK 1 bit)"
         config PRINTER_RES_600

@@ -33,20 +33,22 @@ static stp_image_status_t im_row(stp_image_t *i, unsigned char *d, size_t lim, i
 
 int main(int argc, char **argv)
 {
-  /* usage: gp_ref <resolution> <out.prn> [PageSize] [pages] */
+  /* usage: [GP_DRIVER=bjc-...] gp_ref <resolution> <out.prn> [PageSize] [pages] */
   const char *res = argc > 1 ? argv[1] : "300x300dpi";
   const char *pagesize = argc > 3 ? argv[3] : "A4";
   int pages = argc > 4 ? atoi(argv[4]) : 1;
   out = fopen(argc > 2 ? argv[2] : "ref.prn", "wb");
   stp_init();
-  const stp_printer_t *p = stp_get_printer_by_driver("bjc-MG2500-series");
+  const char *drv = getenv("GP_DRIVER") ? getenv("GP_DRIVER") : "bjc-MG2500-series";
+  const stp_printer_t *p = stp_get_printer_by_driver(drv);
   if (!p) { fprintf(stderr, "no printer\n"); return 1; }
   stp_vars_t *v = stp_vars_create_copy(stp_printer_get_defaults(p));
-  stp_set_driver(v, "bjc-MG2500-series"); stp_set_printer_defaults(v, p);
+  stp_set_driver(v, drv); stp_set_printer_defaults(v, p);
   stp_set_outfunc(v, outfn); stp_set_outdata(v, out);
   stp_set_errfunc(v, errfn); stp_set_errdata(v, stderr);
   stp_set_string_parameter(v, "PageSize", pagesize); stp_set_string_parameter(v, "JobMode", "Job");
   stp_set_string_parameter(v, "MediaType", "Plain");
+  stp_set_string_parameter(v, "Duplex", "None");
   stp_set_string_parameter(v, "Resolution", res);
   stp_set_string_parameter(v, "PrintingMode", "Color");
   stp_set_string_parameter(v, "InputImageType", "RGB");

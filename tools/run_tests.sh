@@ -61,11 +61,19 @@ if [ -n "${GUTENPRINT:-}" ]; then
     echo "== comparison with Gutenprint's MG2500 driver"
     [ -f tools/gutenprint_ref/build/ref600.prn ] || tools/gutenprint_ref/build_ref.sh
     R=tools/gutenprint_ref/build
-    [ -f $R/ref300_2pages.prn ] || tools/gutenprint_ref/build_ref.sh
+    [ -f $R/ref300_2pages.prn ] && [ -f $R/iP2700/ref300_2pages.prn ] || tools/gutenprint_ref/build_ref.sh
     python3 tools/compare_gutenprint.py $R/ref300.prn 300
     python3 tools/compare_gutenprint.py $R/ref600.prn 600
     python3 tools/compare_gutenprint.py $R/ref300_letter.prn 300 --paper letter
     python3 tools/compare_gutenprint.py $R/ref300_2pages.prn 300
+    echo "== comparison with Gutenprint, the other stream variants (canon_bjl.h models)"
+    for m in MG2900 iP2800 E3100 MP230 iP2700; do
+        echo "-- $m"
+        python3 tools/compare_gutenprint.py $R/$m/ref300.prn 300 --model $m
+        python3 tools/compare_gutenprint.py $R/$m/ref600.prn 600 --model $m
+        python3 tools/compare_gutenprint.py $R/$m/ref300_letter.prn 300 --paper letter --model $m
+        python3 tools/compare_gutenprint.py $R/$m/ref300_2pages.prn 300 --model $m
+    done
 fi
 
 if [ -n "${AIRPRINT:-}" ]; then

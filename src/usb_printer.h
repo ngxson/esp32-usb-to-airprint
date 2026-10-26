@@ -10,7 +10,6 @@
 #include "freertos/FreeRTOS.h"
 
 #define CANON_VID 0x04a9
-#define CANON_MG2500_PID 0x176d
 
 typedef struct {
     uint16_t vid, pid;

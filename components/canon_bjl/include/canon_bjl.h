@@ -1,4 +1,6 @@
-// Canon PIXMA MG2500-series raster stream generator ("BJ raster" + IVEC XML).
+// Canon PIXMA raster stream generator ("BJ raster" + IVEC XML) for the
+// MG2500 series and the models whose plain-paper stream only differs from it
+// in a few page setup bytes (bjl_model_t).
 //
 // Portable C (no ESP-IDF dependencies) so the exact same code runs on the
 // ESP32 and in the host-side test harness. Protocol knowledge comes from
@@ -7,7 +9,7 @@
 //
 // Stream layout of one job:
 //   XML StartJob, XML VendorCmd/ModeShift        bjl_emit_start_job / _mode_shift
-//   per page:  ESC [K, ESC (b ... ESC (L          bjl_page_begin
+//   per page:  [BJL control], ESC [K, ESC (b ... ESC (L   bjl_page_begin
 //              ESC (F blocks (8 lines x C,M,Y,K)  bjl_page_add_line (x height)
 //              FF, ESC (b 0                       bjl_page_end
 //   ESC @, XML EndJob                             bjl_emit_end_job
@@ -51,6 +53,28 @@ typedef enum {
     BJL_MODE_COUNT,
 } bjl_mode_id_t;
 
+// Gutenprint models whose plain-paper stream is the MG2400's but for these
+// page setup details (print-canon.c canon_init_printer, canon-printers.h)
+typedef enum {
+    BJL_MODEL_MG2400 = 0,   // MG2400, MG2500, P200
+    BJL_MODEL_MG2900,       // MG2900, MG3000 / E470, E460
+    BJL_MODEL_IP2800,       // iP2800
+    BJL_MODEL_E3100,        // E3100 / TS3100
+    BJL_MODEL_MP230,        // MP230
+    BJL_MODEL_IP2700,       // iP2700, MP250, MP270, MP280, MP490, MP493, MP495, MX340, MX350, MX360, MX410, MX420
+    BJL_MODEL_COUNT,
+} bjl_model_id_t;
+
+typedef struct {
+    const char *name;                      // Gutenprint's model, "MG2400"
+    uint8_t esc_P_len;                     // ESC (P length: 9 or 6
+    uint8_t esc_P_last;                    // 9-byte ESC (P: its last byte (0x00, or 0xff for a model without a cassette)
+    uint8_t esc_l_len;                     // ESC (l length: 3 or 2
+    uint8_t esc_v;                         // sends ESC (v (page rotation)
+    uint8_t esc_w;                         // sends ESC (w on the first page
+    const char *control;                   // BJL control command before the first reset ("SetSilent=OFF"), or NULL
+} bjl_model_t;
+
 typedef enum {
     BJL_PAPER_A4 = 0,
     BJL_PAPER_LETTER,
@@ -82,6 +106,7 @@ typedef struct {
 typedef struct {
     bjl_sink_fn sink;
     void *user;
+    const bjl_model_t *model;
     const bjl_mode_t *mode;
     const bjl_paper_t *paper;
 
@@ -105,11 +130,15 @@ typedef struct {
     uint32_t bytes_out; // total bytes handed to the sink
 } bjl_job_t;
 
+const bjl_model_t *bjl_get_model(bjl_model_id_t id);
 const bjl_mode_t *bjl_get_mode(bjl_mode_id_t id);
 const bjl_paper_t *bjl_get_paper(bjl_paper_id_t id);
+// The model with this name ("MG2900"), BJL_MODEL_COUNT if none.
+bjl_model_id_t bjl_find_model(const char *name);
 
 // Allocates the block buffers (~9 KB at 300 dpi, ~39 KB at 600 dpi).
-int bjl_job_init(bjl_job_t *job, bjl_mode_id_t mode, bjl_paper_id_t paper, bjl_sink_fn sink, void *user);
+int bjl_job_init(bjl_job_t *job, bjl_model_id_t model, bjl_mode_id_t mode, bjl_paper_id_t paper, bjl_sink_fn sink,
+                 void *user);
 void bjl_job_free(bjl_job_t *job);
 
 int bjl_emit_start_job(bjl_job_t *job);

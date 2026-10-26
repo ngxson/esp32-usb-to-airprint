@@ -1,5 +1,6 @@
-// The printer driver the firmware is built for (CONFIG_PRINTER_DRIVER), its
-// handshake with the printer, and the button's test page job: the driver
+// The printer driver (the one of the attached printer, else the one the
+// firmware is built for: CONFIG_PRINTER_DRIVER), its handshake with the
+// printer, and the button's test page job: the driver
 // renders the page line by line and it goes to the printer (or, for a dry
 // run, into a CRC so the output can be compared with the host harness:
 // `host/bjl_host testpage <dpi> out.prn`).
@@ -10,6 +11,7 @@
 
 #include "esp_err.h"
 #include "printer_driver.h"
+#include "usb_printer.h"
 
 typedef struct {
     uint32_t bytes;     // stream size
@@ -17,8 +19,12 @@ typedef struct {
     uint32_t ms;        // wall time
 } print_stats_t;
 
-// The driver chosen in menuconfig ("Printer server" menu).
+// The driver of the last printer plugged in, else the one chosen in
+// menuconfig ("Printer server" menu).
 const printer_driver_t *print_job_driver(void);
+// A printer was plugged in: picks its driver (printer_driver_match). True if
+// print_job_driver() changed.
+bool print_job_set_printer(const usb_printer_info_t *info);
 // A driver's handshake point (printer_io_t.sync): sends what is buffered and
 // waits a while for the printer's reply to `what`; 0, or -1 if the printer is gone.
 int print_job_sync(const char *what);

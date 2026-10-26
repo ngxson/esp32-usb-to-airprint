@@ -1,4 +1,4 @@
-// Canon PIXMA MG2500-series raster stream generator. See canon_bjl.h.
+// Canon PIXMA raster stream generator. See canon_bjl.h.
 #include "canon_bjl.h"
 
 #include <stdlib.h>
@@ -23,8 +23,21 @@ static const char XML_END_JOB[] =
     "<ivec:contents><ivec:operation>EndJob</ivec:operation><ivec:param_set servicetype=\"print\">"
     "<ivec:jobID>00000001</ivec:jobID></ivec:param_set></ivec:contents></cmd>";
 
-// Gutenprint canon_PIXMA_MG2400_modes: "300x300dpi" (inkset 13_C2M2Y2K2,
-// MODE_FLAG_IP8500) and "600x600dpi" (inkset 13_C3M3Y2K2).
+// Gutenprint 5.3.5 caps (canon-printers.h): ESC_P_len, the ESC (P tray byte
+// (0xff for these models, print-canon.c canon_init_setESC_P), ESC_l_len,
+// CANON_CAP_v, CANON_CAP_w and the control_cmdlist.
+static const bjl_model_t MODELS[BJL_MODEL_COUNT] = {
+    [BJL_MODEL_MG2400] = {"MG2400", 9, 0x00, 3, 1, 0, NULL},
+    [BJL_MODEL_MG2900] = {"MG2900", 9, 0xff, 2, 1, 0, NULL},
+    [BJL_MODEL_IP2800] = {"iP2800", 9, 0xff, 3, 1, 0, NULL},
+    [BJL_MODEL_E3100] = {"E3100", 9, 0xff, 2, 1, 1, NULL},
+    [BJL_MODEL_MP230] = {"MP230", 9, 0x00, 3, 0, 0, NULL},
+    [BJL_MODEL_IP2700] = {"iP2700", 6, 0x00, 3, 0, 0, "SetSilent=OFF"},
+};
+
+// Gutenprint canon_PIXMA_MG2400_modes, the same for every model above:
+// "300x300dpi" (inkset 13_C2M2Y2K2, MODE_FLAG_IP8500) and "600x600dpi"
+// (inkset 13_C3M3Y2K2).
 static const bjl_mode_t MODES[BJL_MODE_COUNT] = {
     [BJL_MODE_300DPI] = {"300x300dpi", 300, 1, {0x80, 0x00, 0x01}, {1, 1, 1, 1}, {2, 2, 2, 2}},
     [BJL_MODE_600DPI] = {"600x600dpi", 600, 2, {0x80, 0x80, 0x01}, {2, 2, 1, 1}, {3, 3, 2, 2}},
@@ -37,6 +50,19 @@ static const bjl_paper_t PAPERS[BJL_PAPER_COUNT] = {
     [BJL_PAPER_LETTER] = {"Letter", 612, 792, 0x0d, 5100, 6600},
 };
 #define BJL_MEDIA_PLAIN 0x00
+
+const bjl_model_t *bjl_get_model(bjl_model_id_t id)
+{
+    return (id >= 0 && id < BJL_MODEL_COUNT) ? &MODELS[id] : NULL;
+}
+
+bjl_model_id_t bjl_find_model(const char *name)
+{
+    int i = 0;
+    while (i < BJL_MODEL_COUNT && strcmp(MODELS[i].name, name))
+        i++;
+    return (bjl_model_id_t)i;
+}
 
 const bjl_mode_t *bjl_get_mode(bjl_mode_id_t id)
 {
@@ -202,15 +228,18 @@ uint32_t bjl_crc32(uint32_t crc, const uint8_t *data, size_t len)
     return ~crc;
 }
 
-int bjl_job_init(bjl_job_t *j, bjl_mode_id_t mode_id, bjl_paper_id_t paper_id, bjl_sink_fn sink, void *user)
+int bjl_job_init(bjl_job_t *j, bjl_model_id_t model_id, bjl_mode_id_t mode_id, bjl_paper_id_t paper_id,
+                 bjl_sink_fn sink, void *user)
 {
+    const bjl_model_t *model = bjl_get_model(model_id);
     const bjl_mode_t *m = bjl_get_mode(mode_id);
     const bjl_paper_t *p = bjl_get_paper(paper_id);
-    if (!m || !p || !sink)
+    if (!model || !m || !p || !sink)
         return -1;
     memset(j, 0, sizeof(*j));
     j->sink = sink;
     j->user = user;
+    j->model = model;
     j->mode = m;
     j->paper = p;
     j->width = area_w_pt(p) * m->dpi / 72;
@@ -256,13 +285,25 @@ int bjl_emit_mode_shift(bjl_job_t *j)
 
 int bjl_page_begin(bjl_job_t *j)
 {
+    const bjl_model_t *model = j->model;
     const bjl_mode_t *m = j->mode;
     const bjl_paper_t *pp = j->paper;
     uint8_t b[64];
+    int first = j->pages++ == 0;
 
+    if (first && model->control) {
+        // ESC [K 00 1f, then a BJL control block (print-canon.c canon_control_cmd)
+        static const uint8_t control[] = {0x1b, '[', 'K', 0x02, 0x00, 0x00, 0x1f};
+        static const char start[] = "BJLSTART\nControlMode=Common\n";
+        static const char end[] = "\nBJLEND\n";
+        emit(j, control, sizeof(control));
+        emit(j, start, sizeof(start) - 1);
+        emit(j, model->control, strlen(model->control));
+        emit(j, end, sizeof(end) - 1);
+    }
     // ESC [K 00 0f: reset / initialize, first page only (as Gutenprint)
     static const uint8_t reset[] = {0x1b, '[', 'K', 0x02, 0x00, 0x00, 0x0f};
-    if (j->pages++ == 0)
+    if (first)
         emit(j, reset, sizeof(reset));
 
     b[0] = 0x01;                                    // data compression on
@@ -301,16 +342,19 @@ int bjl_page_begin(bjl_job_t *j)
     put_be32(b + 42, pp->h_600);                    // paper length
     emit_cmd(j, 'p', b, 46);
 
-    // ESC (P: 00 size 00 media orientation(1,0) 01 00 00
-    const uint8_t escP[] = {0x00, pp->size_code, 0x00, BJL_MEDIA_PLAIN, 0x01, 0x00, 0x01, 0x00, 0x00};
-    emit_cmd(j, 'P', escP, sizeof(escP));
+    // ESC (P: 00 size 00 media orientation(1,0) [01 00 tray]
+    const uint8_t escP[] = {0x00, pp->size_code, 0x00, BJL_MEDIA_PLAIN, 0x01, 0x00, 0x01, 0x00, model->esc_P_last};
+    emit_cmd(j, 'P', escP, model->esc_P_len);
 
     static const uint8_t escT[] = {0x03, 0x04, 0x04};   // cartridge: both (black + colour)
     emit_cmd(j, 'T', escT, sizeof(escT));
-    static const uint8_t escl[] = {0x34, 0x00, 0x00};   // rear tray, plain media
-    emit_cmd(j, 'l', escl, sizeof(escl));
+    static const uint8_t escl[] = {0x34, 0x00, 0x00};   // rear tray, plain media[, gap]
+    emit_cmd(j, 'l', escl, model->esc_l_len);
     b[0] = 0x00;                                    // no page rotation
-    emit_cmd(j, 'v', b, 1);
+    if (model->esc_v)
+        emit_cmd(j, 'v', b, 1);
+    if (first && model->esc_w)
+        emit_cmd(j, 'w', b, 1);                     // plain media
 
     b[0] = 0x01;                                    // multiraster mode
     emit_cmd(j, 'I', b, 1);

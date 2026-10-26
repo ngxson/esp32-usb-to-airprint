@@ -933,7 +933,7 @@ static int pipe_page_begin(void *user, const raster_page_t *pg)
         p->io = (printer_io_t){.write = pipe_write, .sync = pipe_sync, .ctx = p};
         p->dpi = pg->dpi;
         LOGI("job %d: %s %d dpi, %s", p->job->id, d->papers[paper].name, pg->dpi, pg->bytes_pp == 3 ? "color" : "gray");
-        p->drv_job = d->job_begin(&p->io, pg->dpi, paper);
+        p->drv_job = d->job_begin(d, &p->io, pg->dpi, paper);
         if (!p->drv_job) {
             p->err = IPP_INTERNAL_ERROR;
             return 3;

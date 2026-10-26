@@ -1,4 +1,4 @@
-# Add AirPrint support to your old printer, using just a cheap ESP32-S3
+# Add AirPrint / AirScan support to your old printer, using just a cheap ESP32-S3
 
 > [!IMPORTANT]
 > This project is actively looking for contributors to add support for more printers. Most importantly, you need to really own the printer you add: every driver must be tested on the real hardware, not only in emulation. See [Adding a printer](#adding-a-printer) to get started.
@@ -19,8 +19,30 @@ Turns any USB-only printers into a wireless printer and scanner. An ESP32-S3 boa
 
 ## Supported printers
 
-- Canon PIXMA MG2500S: My own printer, validated, fully supported
-- Other printers? Please open an issue or a PR
+| Series | Models | Scan |
+|---|---|---|
+| 🟢 MG2500 | MG2550S | yes |
+| 🟡 MG2400 | MG2410 to MG2490 | yes |
+| 🟡 MG2500 | MG2510 to MG2590 (other than the MG2500S) | yes |
+| 🟡 P200 | P200 | no scanner |
+| 🟡 MG2900 | MG2910 to MG2990 | yes |
+| 🟡 MG3000 | MG3010 to MG3090 | yes |
+| 🟡 E470 | E470 to E478 | yes |
+| 🟡 E460 | E460 to E468 | yes |
+| 🟡 iP2800 | iP2810 to iP2899 | no scanner |
+| 🟡 E3100 | E3170 to E3195 | yes |
+| 🟡 TS3100 | TS3110 to TS3195 | yes |
+| 🟡 MP230 | MP230 to MP237 | yes |
+| 🟡 iP2700 | iP2700 to iP2788 | no scanner |
+| 🟡 MP250, MP270, MP280 | MP250 to MP288 | yes |
+| 🟡 MP490, MP493, MP495 | MP490 to MP499 | yes |
+| 🟡 MX340, MX350 | MX340 to MX358 | yes (glass only) |
+| 🟡 MX360, MX410, MX420 | MX360 to MX428 | yes (glass only) |
+
+- 🟢 Validated on real printer
+- 🟡 Expected to work, not tested on real hardware yet.
+
+The firmware recognises the printer when it is plugged in. Other printers? Please open an issue or a PR.
 
 ## What you need
 
@@ -93,7 +115,7 @@ Technical details are in [AGENTS.md](AGENTS.md).
 
 ## Adding a printer
 
-Each printer model is a driver in `components/printers/`: copy `canon_mg2500.c` and select yours with `CONFIG_PRINTER_DRIVER`. See [AGENTS.md](AGENTS.md) for details.
+Each printer model is a driver in `components/printers/`, listed in `printers.c`; the firmware picks the one of the printer that is plugged in. A Canon PIXMA whose stream is close to the MG2500's is one line in `canon_pixma.c`; another printer is a new file in the same folder. See [AGENTS.md](AGENTS.md) for details.
 
 ## License
 

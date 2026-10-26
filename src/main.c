@@ -59,10 +59,8 @@ static void on_printer(bool connected, const usb_printer_info_t *info)
 {
     if (connected) {
         ESP_LOGI(TAG, "printer ready: %s %s", info->manufacturer, info->product);
-        const printer_driver_t *drv = print_job_driver();
-        if (drv->usb_vid && (info->vid != drv->usb_vid || info->pid != drv->usb_pid))
-            ESP_LOGW(TAG, "printer %04x:%04x is not the one the \"%s\" driver expects (%04x:%04x)", info->vid,
-                     info->pid, drv->id, drv->usb_vid, drv->usb_pid);
+        if (print_job_set_printer(info))
+            airprint_esp_driver_changed();     // another model: announce it
         scan_service_recalibrate();     // maybe powered off and on: calibrate again
     }
     show_idle_state();

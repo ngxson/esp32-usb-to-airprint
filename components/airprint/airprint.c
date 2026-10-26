@@ -77,6 +77,7 @@ typedef struct {
     time_t created, processing, completed;
     int impressions;
     int64_t bytes;
+    volatile int line, height;  // progress of the page being printed (read without the lock)
     volatile bool cancel;
 } job_t;
 
@@ -929,6 +930,8 @@ static int pipe_page_begin(void *user, const raster_page_t *pg)
         p->err = IPP_DOCUMENT_FORMAT_ERROR;
         return 2;
     }
+    p->job->line = 0;
+    p->job->height = pg->height;
     bjl_page_begin(&p->bjl);
     bjl_render_page(&p->render, pg->width, pg->height, pg->bytes_pp);
     return p->bjl.err ? 4 : 0;
@@ -946,6 +949,7 @@ static int pipe_line(void *user, int y, const uint8_t *px)
     int64_t t0 = now_us();
     int r = bjl_render_line(&p->render, y, px) ? 4 : 0;
     p->render_us += now_us() - t0;
+    p->job->line = y + 1;
     return r;
 }
 
@@ -1347,20 +1351,51 @@ static const char *job_state_name(int state)
 
 #define STATUS_REFRESH_S 2      // the printer status costs a USB control transfer
 
-int airprint_status_json(void *ctx, char *buf, size_t n)
+static void get_status_cached(airprint_status_t *st)
 {
     static pthread_mutex_t cache_lock = PTHREAD_MUTEX_INITIALIZER;
     static airprint_status_t cached;
     static time_t cached_at;
-    airprint_status_t st;
     time_t now = time(NULL);
     pthread_mutex_lock(&cache_lock);
     if (!cached_at || now - cached_at >= STATUS_REFRESH_S || now < cached_at) {
         get_status(&cached);
         cached_at = now;
     }
-    st = cached;
+    *st = cached;
     pthread_mutex_unlock(&cache_lock);
+}
+
+int airprint_get_activity(airprint_activity_t *a)
+{
+    memset(a, 0, sizeof(*a));
+    if (!s_cfg)
+        return -1;
+    get_status_cached(&a->status);
+    pthread_mutex_lock(&s_lock);
+    expire_pending();
+    a->state = printer_state(&a->status);
+    const job_t *j = s_active;
+    if (!j && s_next_id > 1)
+        j = job_find(s_next_id - 1);
+    if (j) {
+        a->job.id = j->id;
+        snprintf(a->job.name, sizeof(a->job.name), "%s", j->name[0] ? j->name : "Untitled");
+        a->job.state = job_state_name(j->state);
+        a->job.pages = j->impressions;
+        int line = j->line, height = j->height;
+        a->job.percent = j->state == JOB_PROCESSING && height > 0 ? (int)(100LL * line / height) : -1;
+        time_t now = time(NULL);
+        a->job.ended_ago = !job_done(j) ? -1 : now >= j->completed ? (long)(now - j->completed) : 0;
+    }
+    pthread_mutex_unlock(&s_lock);
+    return 0;
+}
+
+int airprint_status_json(void *ctx, char *buf, size_t n)
+{
+    airprint_status_t st;
+    get_status_cached(&st);
     size_t p = 0;
 #define PUT(...) (p += (size_t)snprintf(buf + p, p < n ? n - p : 0, __VA_ARGS__))
 #define STR(s) (p = events_json_str(buf, p, n, (s)))

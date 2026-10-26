@@ -19,6 +19,12 @@ echo "== host unit tests"
 make -C host -s
 host/bjl_host selftest
 host/scan_host selftest 2>/dev/null | tail -1
+host/oled_host selftest
+
+echo "== status screen (all screens in $OUT/oled.png)"
+rm -f $OUT/oled-*.pbm
+host/oled_host render $OUT
+python3 tools/oled_preview.py $OUT $OUT/oled.png
 
 echo "== scans from the emulated scanner (JPEGs in $OUT/)"
 for s in "150 a4" "300 a4" "300 letter" "600 letter"; do
@@ -104,8 +110,10 @@ if [ -n "${AIRPRINT:-}" ]; then
     ipptool -t -f $OUT/doc-a4.urf -d filetype=image/urf $URI print-job.test > $OUT/printjob.log 2>&1 &
     CLIENT=$!
     sleep 3
+    curl -s -o $OUT/oled-live-1-printing.pbm http://localhost:$PORT/dev/oled.pbm
     ipptool -t $URI tools/testdata/cancel-active-job.test 2>&1 | grep -E "PASS|FAIL|EXPECTED" || true
     wait $CLIENT || true
+    curl -s -o $OUT/oled-live-2-canceled.pbm http://localhost:$PORT/dev/oled.pbm
     echo "original Print-Job client: $(grep -oE 'PASS|FAIL' $OUT/printjob.log)"
     kill $SERVER; wait $SERVER 2>/dev/null || true
 
@@ -178,6 +186,7 @@ if [ -n "${AIRPRINT:-}" ]; then
     kill -USR1 $SERVER      # the button: a kept 150 dpi A4 scan
     sleep 1
     ID=$(curl -s $W/scan/status | python3 -c "import json,sys; print(json.load(sys.stdin)['id'])")
+    curl -s -o $OUT/oled-live-3-scanning.pbm $W/dev/oled.pbm
     FROM=0; : > $OUT/button.jpg
     for i in $(seq 1 120); do   # read it while it is scanned, as the page does
         st=$(curl -s -D $OUT/h.txt -o $OUT/piece.bin "$W/scan/last.jpg?id=$ID&from=$FROM"; tr -d '\r' < $OUT/h.txt | awk '/^X-Scan-State:/ {print $2}')
@@ -187,6 +196,7 @@ if [ -n "${AIRPRINT:-}" ]; then
     done
     cmp -s $OUT/button.jpg $OUT/scan150-a4.jpg && echo "button scan read while scanned ($i reads): identical to the direct scan" \
         || echo "button scan DIFFERS from the direct scan"
+    curl -s -o $OUT/oled-live-4-scanned.pbm $W/dev/oled.pbm
     sleep 2; kill $EVENTS 2>/dev/null; wait $EVENTS 2>/dev/null || true
     python3 - $OUT/events.txt <<'PY'
 import json, sys
@@ -197,6 +207,17 @@ print('events: %d snapshots, scan %s, last %s from the %s' % (len(ev), ' -> '.jo
 PY
     kill $SERVER; wait $SERVER 2>/dev/null || true
     grep -h "protocol violations" host/out/airprint-scan.log | sort | uniq -c | sed 's/^ */  scanner closed: /'
+    # the screen as the server's state drew it: printing, canceled, scanning, scanned
+    python3 - $OUT <<'PY'
+import sys
+from PIL import Image
+names = ['1-printing', '2-canceled', '3-scanning', '4-scanned']
+imgs = [Image.open(f'{sys.argv[1]}/oled-live-{n}.pbm').convert('1') for n in names]
+lit = [sum(1 for v in i.crop((0, 23, 128, 37)).getdata() if v == 0) for i in imgs]  # headline row
+distinct = len({i.tobytes() for i in imgs})
+print('status screen from the live state: %d of 4 screens with a headline, %d distinct' % (sum(n > 50 for n in lit), distinct))
+PY
+    python3 tools/oled_preview.py $OUT $OUT/oled.png > /dev/null
     trap - EXIT
 fi
 

@@ -61,6 +61,20 @@ void scan_service_recalibrate(void);
 // events.h source: the scan state as JSON (also GET /scan/status).
 int scan_service_status_json(void *ctx, char *buf, size_t n);
 
+// The same for the device's own display.
+typedef struct {
+    bool scanner;               // a scanner is attached
+    const char *state;          // "idle", "scanning", "done", "failed", "canceled"
+    const char *source;         // "web", "stream", "button", "escl", "" before the first scan
+    const char *paper;          // "a4", "letter", "card", "custom"
+    int dpi;
+    int lines, height;          // lines scanned of height
+    unsigned long bytes;        // JPEG so far
+    long ended_ago;             // seconds since the scan ended, -1 while it runs or before any
+    char error[64];
+} scan_info_t;
+void scan_service_get_info(scan_info_t *info);
+
 // HTML for the status page
 #define SCAN_HOME_HTML "<p><a href=\"/scan\">Scan a document</a></p>"
 

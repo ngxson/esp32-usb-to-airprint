@@ -1,5 +1,6 @@
 #include "wifi.h"
 
+#include <stdio.h>
 #include <string.h>
 
 #include "esp_check.h"
@@ -16,6 +17,7 @@ static const char *TAG = "wifi_sta";
 
 static volatile bool s_connected;
 static int s_retries;
+static esp_netif_t *s_netif;
 
 static void on_event(void *arg, esp_event_base_t base, int32_t id, void *data)
 {
@@ -49,8 +51,8 @@ esp_err_t wifi_start(const char *hostname)
     ESP_RETURN_ON_ERROR(err, TAG, "nvs");
     ESP_RETURN_ON_ERROR(esp_netif_init(), TAG, "netif");
     ESP_RETURN_ON_ERROR(esp_event_loop_create_default(), TAG, "event loop");
-    esp_netif_t *netif = esp_netif_create_default_wifi_sta();
-    esp_netif_set_hostname(netif, hostname);
+    s_netif = esp_netif_create_default_wifi_sta();
+    esp_netif_set_hostname(s_netif, hostname);
 
     // the driver's own info logs include the SSID; keep warnings only
     esp_log_level_set("wifi", ESP_LOG_WARN);
@@ -81,4 +83,24 @@ esp_err_t wifi_start(const char *hostname)
 bool wifi_connected(void)
 {
     return s_connected;
+}
+
+bool wifi_get_ip(char *buf, size_t n)
+{
+    esp_netif_ip_info_t ip;
+    if (!s_connected || !s_netif || esp_netif_get_ip_info(s_netif, &ip) != ESP_OK) {
+        if (n)
+            buf[0] = 0;
+        return false;
+    }
+    snprintf(buf, n, IPSTR, IP2STR(&ip.ip));
+    return true;
+}
+
+int wifi_rssi(void)
+{
+    int rssi = 0;
+    if (!s_connected || esp_wifi_sta_get_rssi(&rssi) != ESP_OK)
+        return 0;
+    return rssi;
 }

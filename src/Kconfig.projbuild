@@ -24,4 +24,45 @@ menu "Printer server"
         int "Print button GPIO (active low)"
         default 0
 
+    config PRINT_BUTTON2_GPIO
+        int "Second print button GPIO (same as BOOT, active low, -1 = none)"
+        default 4
+
+    config USER_BUTTON_GPIO
+        int "User button GPIO (no action assigned: on_user_button in main.c; active low, -1 = none)"
+        default 5
+
+    config OLED_SDA_GPIO
+        int "Status screen (I2C OLED) SDA GPIO"
+        default 42
+
+    config OLED_SCL_GPIO
+        int "Status screen (I2C OLED) SCL GPIO"
+        default 41
+
+    choice OLED_CONTROLLER
+        prompt "Status screen controller"
+        default OLED_SSD1306
+        help
+            0.96" 128x64 modules are usually SSD1306, 1.3" ones SH1106
+            (on an SSD1306 setting, an SH1106 shows a 2-pixel column of
+            noise at one edge).
+        config OLED_SSD1306
+            bool "SSD1306"
+        config OLED_SH1106
+            bool "SH1106"
+    endchoice
+
+    config OLED_FLIP
+        bool "Rotate the status screen by 180 degrees"
+        default n
+
+    config OLED_SLEEP_MIN
+        int "Turn the status screen off after this many minutes without change (0 = never)"
+        range 0 1440
+        default 10
+        help
+            OLED pixels that stay lit for months burn in. Any change on the
+            screen or a press of the button turns it back on.
+
 endmenu

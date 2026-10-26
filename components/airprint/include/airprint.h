@@ -87,6 +87,23 @@ int airprint_http_detach(airprint_http_t *h);
 // events.h source: the printer, its status and the recent jobs as JSON.
 int airprint_status_json(void *ctx, char *buf, size_t n);
 
+// The same for the device's own display: the printer status (refreshed at
+// most every 2 s, as for the JSON) and the running job, else the last one.
+typedef struct {
+    airprint_status_t status;
+    int state;                  // printer-state: 3 idle, 4 processing, 5 stopped
+    struct {
+        int id;                 // 0 = no job yet
+        char name[64];
+        const char *state;      // "pending", "processing", "completed", "canceled", "aborted"
+        int pages;              // pages printed
+        int percent;            // of the page being printed, -1 when not printing
+        long ended_ago;         // seconds since the job ended, -1 while it runs
+    } job;
+} airprint_activity_t;
+// -1 before airprint_start.
+int airprint_get_activity(airprint_activity_t *a);
+
 #ifdef __cplusplus
 }
 #endif

@@ -1,14 +1,19 @@
 // ESP32-S3 print server for the Canon PIXMA MG2500 series.
 //
-// LED: blinking yellow = ready, no printer / solid green = printer attached /
+// LED: solid yellow = ready, no printer / solid green = printer attached /
 //      blinking green = printing (test page or AirPrint) or scanning / fast red = last
 //      job failed / blue flashes = Identify-Printer.
-// BOOT button: press = scan an A4 page at 150 dpi (kept on the device: every open web page
-//      shows it and saves it to its Files), double press = print an A4 colour
-//      test page (dry run without a printer), hold 2 s while printing or
-//      scanning = cancel.
+// BOOT button (and a second one on GPIO4, the same): press = scan an A4 page
+//      at 150 dpi (kept on the device: every open web page shows it and saves
+//      it to its Files), double press = print an A4 colour test page (dry run
+//      without a printer), hold 2 s while printing or scanning = cancel. While
+//      the screen is off, a press only turns it on.
+// User button (GPIO5): wired and debounced, but does nothing yet: a free
+//      button for your own feature (on_user_button below).
 // AirPrint: joins the WiFi from .env and serves IPP on port 631; the web UI
 //      is at http://<host>/ (port 80, and 631).
+// Screen: an optional I2C OLED shows the IP address, the printer and what it
+//      is doing (oled.h); it sleeps when nothing changes, a press wakes it.
 // MODE=debug: also the remote log, crash dumps and firmware updates over
 //      WiFi (debug.h, tools/remote.py).
 #include <stdbool.h>
@@ -22,6 +27,7 @@
 #include "airprint_esp.h"
 #include "debug.h"
 #include "local_config.h"
+#include "oled.h"
 #include "print_job.h"
 #include "scan_service.h"
 #include "sdkconfig.h"
@@ -123,33 +129,71 @@ static void on_double_press(void)
     }
 }
 
-static void button_task(void *arg)
+// The second button (GPIO5): free for whatever you want it to do. Called once
+// per press (debounced), on the button task: start long work in a task of its
+// own. The press has already turned the screen on.
+static void on_user_button(void)
 {
-    const gpio_num_t pin = CONFIG_PRINT_BUTTON_GPIO;
+    ESP_LOGI(TAG, "user button (GPIO%d) pressed: no action assigned", CONFIG_USER_BUTTON_GPIO);
+}
+
+static void input_pullup(int pin)
+{
+    if (pin < 0)
+        return;
     gpio_config_t io = {
         .pin_bit_mask = 1ULL << pin,
         .mode = GPIO_MODE_INPUT,
         .pull_up_en = GPIO_PULLUP_ENABLE,
     };
     gpio_config(&io);
+}
 
-    bool stable = true;         // true = released (active low)
+static bool is_down(int pin)
+{
+    return pin >= 0 && gpio_get_level(pin) == 0;   // active low
+}
+
+// 30 ms of the same level; true when the stable state changes
+static bool debounce(bool down, bool *stable, int *same)
+{
+    if (down == *stable) {
+        *same = 0;
+        return false;
+    }
+    if (++*same < 3)
+        return false;
+    *stable = down;
+    *same = 0;
+    return true;
+}
+
+static void button_task(void *arg)
+{
+    input_pullup(CONFIG_PRINT_BUTTON_GPIO);
+    input_pullup(CONFIG_PRINT_BUTTON2_GPIO);
+    input_pullup(CONFIG_USER_BUTTON_GPIO);
+
+    // the print buttons (BOOT and its twin): one button for the logic below
+    bool down = false;
     int same = 0;
     TickType_t pressed_at = 0, released_at = 0;
     bool long_fired = false;
     bool pending = false;       // a press waiting to see whether a second one follows
+    bool waking = false;        // this press turned the screen on: it does nothing else
+    // the user button
+    bool user_down = false;
+    int user_same = 0;
     while (1) {
         vTaskDelay(pdMS_TO_TICKS(10));
-        bool level = gpio_get_level(pin);
-        if (level == stable) {
-            same = 0;
-        } else if (++same >= 3) {           // 30 ms debounce
-            stable = level;
-            same = 0;
-            if (!stable) {
+        if (debounce(is_down(CONFIG_PRINT_BUTTON_GPIO) || is_down(CONFIG_PRINT_BUTTON2_GPIO), &down, &same)) {
+            if (down) {
                 pressed_at = xTaskGetTickCount();
                 long_fired = false;
-            } else if (!long_fired) {
+                waking = oled_wake();
+                if (waking)
+                    pending = false;
+            } else if (!long_fired && !waking) {
                 if (pending) {
                     pending = false;
                     on_double_press();
@@ -159,11 +203,11 @@ static void button_task(void *arg)
                 }
             }
         }
-        if (pending && stable && xTaskGetTickCount() - released_at >= pdMS_TO_TICKS(DOUBLE_PRESS_MS)) {
+        if (pending && !down && xTaskGetTickCount() - released_at >= pdMS_TO_TICKS(DOUBLE_PRESS_MS)) {
             pending = false;
             on_press();
         }
-        if (!stable && !long_fired && xTaskGetTickCount() - pressed_at >= pdMS_TO_TICKS(LONG_PRESS_MS)) {
+        if (down && !long_fired && !waking && xTaskGetTickCount() - pressed_at >= pdMS_TO_TICKS(LONG_PRESS_MS)) {
             long_fired = true;
             if (s_busy || s_airprint_busy) {
                 ESP_LOGW(TAG, "cancel requested");
@@ -171,6 +215,9 @@ static void button_task(void *arg)
                 scan_service_cancel();
             }
         }
+
+        if (debounce(is_down(CONFIG_USER_BUTTON_GPIO), &user_down, &user_same) && user_down && !oled_wake())
+            on_user_button();
     }
 }
 
@@ -212,9 +259,10 @@ void app_main(void)
         debug_log_start(64 * 1024);
     ESP_ERROR_CHECK(status_led_init());
     status_led_set(LED_WAITING);
+    oled_start(HOSTNAME);
     ESP_ERROR_CHECK(usb_printer_start(on_printer));
     xTaskCreate(button_task, "button", 3072, NULL, 5, NULL);
-    ESP_LOGI(TAG, "ready: press BOOT to scan, twice for a test page");
+    ESP_LOGI(TAG, "ready: press BOOT (or GPIO%d) to scan, twice for a test page", CONFIG_PRINT_BUTTON2_GPIO);
 
     xTaskCreate(ota_confirm_task, "ota_confirm", 3072, NULL, 2, NULL);
     // AirPrint; the printer keeps working locally if WiFi isn't configured

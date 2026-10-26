@@ -510,6 +510,24 @@ int scan_service_status_json(void *ctx, char *js, size_t size)
     return n < (int)size ? n : -1;
 }
 
+void scan_service_get_info(scan_info_t *info)
+{
+    memset(info, 0, sizeof(*info));
+    info->scanner = !s_cfg || !s_cfg->available || s_cfg->available(s_cfg->ctx);
+    pthread_mutex_lock(&s_lock);
+    int64_t now = now_us();
+    info->state = STATE_NAMES[S.state];
+    info->source = S.source ? S.source : "";
+    info->paper = paper_name(S.paper);
+    info->dpi = S.dpi;
+    info->lines = S.lines;
+    info->height = S.height;
+    info->bytes = (unsigned long)S.wpos;
+    info->ended_ago = S.state == ST_SCANNING || !S.t_end ? -1 : (long)((now - S.t_end) / 1000000);
+    snprintf(info->error, sizeof(info->error), "%s", S.error);
+    pthread_mutex_unlock(&s_lock);
+}
+
 static void handle_status(airprint_http_t *h)
 {
     char js[640];

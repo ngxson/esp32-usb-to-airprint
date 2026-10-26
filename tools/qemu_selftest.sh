@@ -142,6 +142,8 @@ if grep -q "QEMU_SELFTEST ipp ready" "$OUT/serial.log"; then
     }
     # (the rollback bootloader marks the image it first boots valid)
     check "debug /info partition" "$(field partition) $(field ota_state)" "ota_0 valid"
+    check "status screen without a display: disabled, no task" \
+        "$(grep -aq 'oled: no display at 0x3c.*screen disabled' "$OUT/serial.log" && echo reported) $(curl -s -m 10 $D/info | awk '$1 == "oled"' | wc -l | tr -d ' ')" "reported 0"
     # (the 16 KB ring has long dropped the boot; the scans' last lines are recent)
     check "debug /log has the scans" "$(curl -s -m 10 $D/log | grep -ac 'QEMU_SCAN')" 3
     check "debug live log (port 2323)" "$(nc -w 3 localhost 12323 | grep -ac 'QEMU_SCAN')" 3

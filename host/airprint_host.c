@@ -15,6 +15,7 @@
 #include "airprint.h"
 #include "events.h"
 #include "fake_scanner.h"
+#include "oled_ui.h"
 #include "scan_service.h"
 #include "shared_buf.h"
 #include "webui.h"
@@ -90,9 +91,37 @@ static void scan_close(void *ctx)
             s_scanner.errors ? ", first: " : "", s_scanner.error);
 }
 
+// GET /dev/oled.pbm: the device's status screen for the current state
+static void send_oled(airprint_http_t *h)
+{
+    static oled_state_t st;
+    memset(&st, 0, sizeof(st));
+    st.name = "airprint-host";
+    st.wifi_configured = true;
+    strcpy(st.ip, "127.0.0.1");
+    st.started = airprint_get_activity(&st.print) == 0;
+    scan_service_get_info(&st.scan);
+    uint8_t fb[OLED_FB_SIZE];
+    oled_ui_render(&st, fb);
+    char pbm[16 + OLED_FB_SIZE];
+    int n = snprintf(pbm, sizeof(pbm), "P4\n%d %d\n", OLED_WIDTH, OLED_HEIGHT);
+    for (int y = 0; y < OLED_HEIGHT; y++)
+        for (int x = 0; x < OLED_WIDTH; x += 8) {
+            uint8_t b = 0;
+            for (int k = 0; k < 8; k++)
+                b |= (uint8_t)((fb[(y >> 3) * OLED_WIDTH + x + k] >> (y & 7) & 1) << (7 - k));
+            pbm[n++] = (char)b;
+        }
+    airprint_http_send(h, "200 OK", "image/x-portable-bitmap", pbm, (size_t)n);
+}
+
 static bool http_handler(void *ctx, airprint_http_t *h, const char *method, const char *path)
 {
     fprintf(stderr, "host: %s %s (Host: %s)\n", method, path, airprint_http_host(h));
+    if (!strcmp(method, "GET") && !strcmp(path, "/dev/oled.pbm")) {
+        send_oled(h);
+        return true;
+    }
     return scan_service_http(h, method, path) || events_http(h, method, path) || webui_http(h, method, path);
 }
 

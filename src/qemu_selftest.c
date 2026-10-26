@@ -23,6 +23,7 @@
 #include "freertos/semphr.h"
 #include "freertos/task.h"
 #include "fake_scanner.h"
+#include "oled.h"
 #include "print_job.h"
 #include "scan_service.h"
 #include "shared_buf.h"
@@ -133,6 +134,7 @@ void app_main(void)
 {
     debug_log_start(16 * 1024);
     xTaskCreate(ota_confirm_task, "ota_confirm", 3072, NULL, 2, NULL);
+    oled_start("qemu");     // no display on the emulated I2C bus: must just say so
     for (int m = 0; m < BJL_MODE_COUNT; m++) {
         print_stats_t st;
         esp_err_t err = print_job_test_page(true, (bjl_mode_id_t)m, &st);

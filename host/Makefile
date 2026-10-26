@@ -4,7 +4,8 @@ CFLAGS ?= -O2 -g -Wall -Wextra -Wno-unused-parameter -fsanitize=address,undefine
 CFLAGS += -ffp-contract=off
 BJL = ../components/canon_bjl/canon_bjl.c ../components/canon_bjl/testpage.c ../components/canon_bjl/bjl_render.c
 AIRPRINT = ../components/airprint/airprint.c ../components/airprint/ipp.c ../components/airprint/raster.c \
-           ../components/airprint/events.c
+           ../components/airprint/events.c ../components/airprint/printer_driver.c
+PRINTERS = ../components/printers/printers.c ../components/printers/canon_mg2500.c
 WEBUI = ../components/webui/webui.c ../components/webui/web_assets.c
 SCAN_CORE = ../components/scanner/pixma_scan.c ../components/scanner/jpeg_enc.c ../components/scanner/fake_scanner.c
 SCANNER = $(SCAN_CORE) ../components/scanner/shared_buf.c ../components/scanner/scan_service.c
@@ -15,13 +16,14 @@ INC = -I../components/canon_bjl/include -I../components/airprint/include -I../co
 
 all: bjl_host airprint_host scan_host oled_host
 
-bjl_host: bjl_host.c $(BJL) ../components/canon_bjl/include/*.h
-	$(CC) $(CFLAGS) $(INC) bjl_host.c $(BJL) -lm -o $@
+bjl_host: bjl_host.c $(BJL) $(PRINTERS) ../components/airprint/printer_driver.c ../components/canon_bjl/include/*.h \
+          ../components/airprint/include/printer_driver.h
+	$(CC) $(CFLAGS) $(INC) bjl_host.c $(BJL) $(PRINTERS) ../components/airprint/printer_driver.c -lm -o $@
 
-airprint_host: airprint_host.c $(BJL) $(AIRPRINT) $(SCANNER) $(WEBUI) $(OLED) ../components/airprint/include/*.h \
+airprint_host: airprint_host.c $(BJL) $(AIRPRINT) $(PRINTERS) $(SCANNER) $(WEBUI) $(OLED) ../components/airprint/include/*.h \
                ../components/airprint/*.h ../components/scanner/include/*.h ../components/webui/include/*.h \
                ../components/oled/include/*.h
-	$(CC) $(CFLAGS) $(INC) airprint_host.c $(BJL) $(AIRPRINT) $(SCANNER) $(WEBUI) $(OLED) -lm -lpthread -o $@
+	$(CC) $(CFLAGS) $(INC) airprint_host.c $(BJL) $(AIRPRINT) $(PRINTERS) $(SCANNER) $(WEBUI) $(OLED) -lm -lpthread -o $@
 
 # the web UI (web/), built and packed when its sources changed
 ../components/webui/web_assets.c: FORCE

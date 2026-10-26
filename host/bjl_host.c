@@ -4,13 +4,15 @@
 //   bjl_host encode <300|600> <a4|letter> out.prn page1.raw [page2.raw ...]
 //                                           encode raw planes (per line: C,M,Y,K
 //                                           line_bytes each), one file per page
-//   bjl_host selftest                       PackBits / framing unit tests
+//   bjl_host selftest                       PackBits / framing unit tests, and the
+//                                           printer drivers' test pages against testpage
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
 
 #include "canon_bjl.h"
+#include "printer_driver.h"
 #include "testpage.h"
 
 static int file_sink(void *user, const uint8_t *data, size_t len)
@@ -27,6 +29,17 @@ typedef struct {
     FILE *f;
     uint32_t crc;
 } out_t;
+
+static int crc_sink(void *user, const uint8_t *data, size_t len)
+{
+    *(uint32_t *)user = bjl_crc32(*(uint32_t *)user, data, len);
+    return 0;
+}
+
+static int crc_write(void *ctx, const uint8_t *data, size_t len)
+{
+    return crc_sink(ctx, data, len);
+}
 
 static int file_crc_sink(void *user, const uint8_t *data, size_t len)
 {
@@ -262,6 +275,36 @@ static int cmd_selftest(void)
         CHECK(bjl_page_add_line(&job, NULL) == -5, "error not sticky");
         CHECK(job.bytes_out <= 800, "bytes counted after error");
         bjl_job_free(&job);
+    }
+
+    // the Canon driver's test page (what the firmware's button prints) is
+    // the stream of the test page job above, byte for byte
+    {
+        const printer_driver_t *d = printer_driver_find("canon-mg2500");
+        CHECK(d && d->test_page, "canon-mg2500 driver");
+        for (int i = 0; d && i < d->nresolutions; i++) {
+            int dpi = d->resolutions[i];
+            uint32_t want = 0, got = 0;
+            bjl_job_t job;
+            testpage_t tp;
+            char info1[64];
+            bjl_job_init(&job, parse_mode(dpi == 600 ? "600" : "300"), BJL_PAPER_A4, crc_sink, &want);
+            testpage_format_mode(&job, info1, sizeof(info1));
+            testpage_init(&tp, &job, info1, TESTPAGE_DRYRUN_INFO);
+            bjl_emit_start_job(&job);
+            bjl_emit_mode_shift(&job);
+            bjl_page_begin(&job);
+            for (int y = 0; y < job.height; y++)
+                bjl_page_add_line(&job, testpage_render_line(&tp, y));
+            bjl_page_end(&job);
+            bjl_emit_end_job(&job);
+            testpage_free(&tp);
+            bjl_job_free(&job);
+            printer_io_t io = {.write = crc_write, .ctx = &got};
+            CHECK(d->test_page(&io, dpi, TESTPAGE_DRYRUN_INFO) == 0, "driver test page %d dpi", dpi);
+            CHECK(got == want, "driver test page %d dpi: crc32 %08x, expected %08x", dpi, (unsigned)got,
+                  (unsigned)want);
+        }
     }
 
     printf("selftest: %s (%d failures)\n", failures ? "FAILED" : "OK", failures);

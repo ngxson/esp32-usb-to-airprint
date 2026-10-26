@@ -1,5 +1,12 @@
 menu "Printer server"
 
+    config PRINTER_DRIVER
+        string "Printer driver"
+        default "canon-mg2500"
+        help
+            The id of the printer model the firmware drives, from
+            components/printers/printers.c.
+
     choice PRINTER_RESOLUTION
         prompt "Test page resolution"
         default PRINTER_RES_600

@@ -135,12 +135,14 @@ void app_main(void)
     debug_log_start(16 * 1024);
     xTaskCreate(ota_confirm_task, "ota_confirm", 3072, NULL, 2, NULL);
     oled_start("qemu");     // no display on the emulated I2C bus: must just say so
-    for (int m = 0; m < BJL_MODE_COUNT; m++) {
+    const printer_driver_t *drv = print_job_driver();
+    for (int i = 0; i < drv->nresolutions; i++) {
         print_stats_t st;
-        esp_err_t err = print_job_test_page(true, (bjl_mode_id_t)m, &st);
-        ESP_LOGI(TAG, "QEMU_SELFTEST mode=%s bytes=%lu crc32=%08lx err=%s heap_min=%lu",
-                 bjl_get_mode((bjl_mode_id_t)m)->name, (unsigned long)st.bytes, (unsigned long)st.crc32,
-                 esp_err_to_name(err), (unsigned long)esp_get_minimum_free_heap_size());
+        int dpi = drv->resolutions[i];
+        esp_err_t err = print_job_test_page(true, dpi, &st);
+        ESP_LOGI(TAG, "QEMU_SELFTEST mode=%dx%ddpi bytes=%lu crc32=%08lx err=%s heap_min=%lu", dpi, dpi,
+                 (unsigned long)st.bytes, (unsigned long)st.crc32, esp_err_to_name(err),
+                 (unsigned long)esp_get_minimum_free_heap_size());
     }
 
     start_openeth();
@@ -156,7 +158,7 @@ void app_main(void)
                                  .uuid = "a4d1e9b2-0b6f-4c3e-9d2a-000000000000"};
     scfg.io = fake_scanner_io(&s_scanner);
     scan_service_init(&scfg);
-    static const airprint_config_t cfg = {
+    static airprint_config_t cfg = {
         .name = "Canon MG2500 (QEMU)",
         .make_model = "Canon MG2500 series",
         .uuid = "a4d1e9b2-0b6f-4c3e-9d2a-000000000000",
@@ -170,6 +172,7 @@ void app_main(void)
         .http_handler = http_handler,
         .home_html = SCAN_HOME_HTML,
     };
+    cfg.driver = drv;
     events_add_source("printer", airprint_status_json, NULL);
     events_add_source("scan", scan_service_status_json, NULL);
     airprint_start(&cfg);

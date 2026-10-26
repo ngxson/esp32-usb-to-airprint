@@ -11,14 +11,13 @@
 extern "C" {
 #endif
 
-// URF capabilities, shared by the IPP attribute and the DNS-SD TXT record:
-// 8-bit gray + sRGB, 300 and 600 dpi, plain paper, 3 print qualities.
-#define AIRPRINT_URF "V1.4,CP1,W8,SRGB24,RS300-600,MT1,PQ3-4-5"
+// The URF capabilities come from the printer driver (printer_driver_urf).
 #define AIRPRINT_PDL "application/octet-stream,image/urf,image/pwg-raster"
 
 #define AIRPRINT_MAX_SUPPLIES 4
 
 typedef struct airprint_http airprint_http_t;   // one HTTP request/response
+struct printer_driver;                          // printer_driver.h
 
 typedef struct {
     bool connected;             // printer attached and usable
@@ -42,12 +41,14 @@ typedef struct {
     const char *device_id;      // IEEE 1284 ID advertised to clients
     int port;                   // 631
     int web_port;               // the same server on a second port for browsers (80), 0 = none
+    // the printer model: capabilities and its raster -> printer data conversion
+    const struct printer_driver *driver;
 
     // platform hooks; all optional except job_write
     void (*get_status)(void *ctx, airprint_status_t *st);
     int (*job_open)(void *ctx);                 // claim the printer, 0 = ok
     int (*job_write)(void *ctx, const uint8_t *data, size_t len);  // < 0 aborts
-    int (*job_sync)(void *ctx, const char *what);   // after "StartJob"/"ModeShift"/"EndJob": flush + wait
+    int (*job_sync)(void *ctx, const char *what);   // a driver's handshake point (e.g. "StartJob"): flush + wait
     void (*job_close)(void *ctx, bool ok);
     void (*job_cancel)(void *ctx);              // asynchronous cancel of the running job
     void (*job_state)(void *ctx, bool printing);    // e.g. LED

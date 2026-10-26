@@ -14,6 +14,7 @@
 
 #include "airprint.h"
 #include "events.h"
+#include "printer_driver.h"
 #include "fake_scanner.h"
 #include "oled_ui.h"
 #include "scan_service.h"
@@ -152,6 +153,12 @@ int main(int argc, char **argv)
     };
     if (argc > 1)
         cfg.port = atoi(argv[1]);
+    // PRINTER_DRIVER=<id> picks another driver (components/printers/printers.c)
+    cfg.driver = printer_driver_find(getenv("PRINTER_DRIVER") ? getenv("PRINTER_DRIVER") : "canon-mg2500");
+    if (!cfg.driver) {
+        fprintf(stderr, "unknown PRINTER_DRIVER\n");
+        return 1;
+    }
     if (getenv("AIRPRINT_HOST_SLOW_US"))
         s_slow_us = atoi(getenv("AIRPRINT_HOST_SLOW_US"));
     unsigned kbps = getenv("FAKE_SCANNER_KBPS") ? (unsigned)atoi(getenv("FAKE_SCANNER_KBPS")) : 800;

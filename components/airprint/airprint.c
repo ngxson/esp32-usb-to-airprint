@@ -21,11 +21,10 @@
 #include <time.h>
 #include <unistd.h>
 
-#include "bjl_render.h"
-#include "canon_bjl.h"
 #include "events.h"
 #include "icon_png.h"
 #include "ipp.h"
+#include "printer_driver.h"
 #include "raster.h"
 
 #ifdef ESP_PLATFORM
@@ -52,11 +51,7 @@
 #define MAX_JOBS 10
 #define MULTIPLE_OP_TIMEOUT_S 60
 
-// borders in 1/100 mm, matching the printable area of canon_bjl
-#define MARGIN_LEFT 353     // 10 pt
-#define MARGIN_RIGHT 353
-#define MARGIN_TOP 318      // 9 pt
-#define MARGIN_BOTTOM 529   // 15 pt
+#define MAX_PAPERS 8         // of a driver, in the IPP attributes
 
 enum {
     JOB_PENDING = 3,
@@ -425,18 +420,44 @@ static void media_col(ipp_out_t *o, const char *name, const char *key, int x, in
     ipp_out_member(o, "media-size-name");
     ipp_out_str(o, IPP_TAG_KEYWORD, NULL, key);
     ipp_out_member(o, "media-left-margin");
-    ipp_out_int(o, IPP_TAG_INTEGER, NULL, MARGIN_LEFT);
+    ipp_out_int(o, IPP_TAG_INTEGER, NULL, s_cfg->driver->margin_left);
     ipp_out_member(o, "media-right-margin");
-    ipp_out_int(o, IPP_TAG_INTEGER, NULL, MARGIN_RIGHT);
+    ipp_out_int(o, IPP_TAG_INTEGER, NULL, s_cfg->driver->margin_right);
     ipp_out_member(o, "media-top-margin");
-    ipp_out_int(o, IPP_TAG_INTEGER, NULL, MARGIN_TOP);
+    ipp_out_int(o, IPP_TAG_INTEGER, NULL, s_cfg->driver->margin_top);
     ipp_out_member(o, "media-bottom-margin");
-    ipp_out_int(o, IPP_TAG_INTEGER, NULL, MARGIN_BOTTOM);
+    ipp_out_int(o, IPP_TAG_INTEGER, NULL, s_cfg->driver->margin_bottom);
     ipp_out_member(o, "media-source");
     ipp_out_str(o, IPP_TAG_KEYWORD, NULL, "auto");
     ipp_out_member(o, "media-type");
     ipp_out_str(o, IPP_TAG_KEYWORD, NULL, "stationery");
     ipp_out_coll_end(o);
+}
+
+// media-col-database / -ready: one value per paper of the driver
+static void media_cols(ipp_out_t *o, const char *name)
+{
+    const printer_driver_t *d = s_cfg->driver;
+    for (int i = 0; i < d->npapers; i++)
+        media_col(o, i ? NULL : name, d->papers[i].pwg, d->papers[i].width, d->papers[i].height);
+}
+
+// the papers' names, NULL-terminated
+static const char **media_names(const char *names[MAX_PAPERS + 1])
+{
+    const printer_driver_t *d = s_cfg->driver;
+    int n = 0;
+    for (; n < d->npapers && n < MAX_PAPERS; n++)
+        names[n] = d->papers[n].pwg;
+    names[n] = NULL;
+    return names;
+}
+
+static void resolutions(ipp_out_t *o, const char *name)
+{
+    const printer_driver_t *d = s_cfg->driver;
+    for (int i = 0; i < d->nresolutions; i++)
+        ipp_out_res(o, i ? NULL : name, d->resolutions[i], d->resolutions[i]);
 }
 
 static void get_status(airprint_status_t *st)
@@ -459,6 +480,8 @@ static int printer_state(const airprint_status_t *st)
 static void add_printer_attrs(ipp_out_t *o, const conn_t *c, const filter_t *f)
 {
     const airprint_config_t *cfg = s_cfg;
+    const printer_driver_t *drv = cfg->driver;
+    const char *papers[MAX_PAPERS + 1];
     airprint_status_t st;
     get_status(&st);
     time_t now = time(NULL);
@@ -470,7 +493,7 @@ static void add_printer_attrs(ipp_out_t *o, const conn_t *c, const filter_t *f)
     if (W("charset-supported"))
         ipp_out_strs(o, IPP_TAG_CHARSET, "charset-supported", (const char *[]){"us-ascii", "utf-8", NULL});
     if (W("color-supported"))
-        ipp_out_bool(o, "color-supported", true);
+        ipp_out_bool(o, "color-supported", drv->color);
     if (W("compression-supported"))
         ipp_out_str(o, IPP_TAG_KEYWORD, "compression-supported", "none");
     if (W("copies-default"))
@@ -505,51 +528,41 @@ static void add_printer_attrs(ipp_out_t *o, const conn_t *c, const filter_t *f)
     if (W("job-ids-supported"))
         ipp_out_bool(o, "job-ids-supported", true);
     if (W("media-bottom-margin-supported"))
-        ipp_out_int(o, IPP_TAG_INTEGER, "media-bottom-margin-supported", MARGIN_BOTTOM);
+        ipp_out_int(o, IPP_TAG_INTEGER, "media-bottom-margin-supported", drv->margin_bottom);
     if (W("media-left-margin-supported"))
-        ipp_out_int(o, IPP_TAG_INTEGER, "media-left-margin-supported", MARGIN_LEFT);
+        ipp_out_int(o, IPP_TAG_INTEGER, "media-left-margin-supported", drv->margin_left);
     if (W("media-right-margin-supported"))
-        ipp_out_int(o, IPP_TAG_INTEGER, "media-right-margin-supported", MARGIN_RIGHT);
+        ipp_out_int(o, IPP_TAG_INTEGER, "media-right-margin-supported", drv->margin_right);
     if (W("media-top-margin-supported"))
-        ipp_out_int(o, IPP_TAG_INTEGER, "media-top-margin-supported", MARGIN_TOP);
-    if (W("media-col-database")) {
-        media_col(o, "media-col-database", "iso_a4_210x297mm", 21000, 29700);
-        media_col(o, NULL, "na_letter_8.5x11in", 21590, 27940);
-    }
+        ipp_out_int(o, IPP_TAG_INTEGER, "media-top-margin-supported", drv->margin_top);
+    if (W("media-col-database"))
+        media_cols(o, "media-col-database");
     if (W("media-col-default"))
-        media_col(o, "media-col-default", "iso_a4_210x297mm", 21000, 29700);
-    if (W("media-col-ready")) {
-        media_col(o, "media-col-ready", "iso_a4_210x297mm", 21000, 29700);
-        media_col(o, NULL, "na_letter_8.5x11in", 21590, 27940);
-    }
+        media_col(o, "media-col-default", drv->papers[0].pwg, drv->papers[0].width, drv->papers[0].height);
+    if (W("media-col-ready"))
+        media_cols(o, "media-col-ready");
     if (W("media-col-supported"))
         ipp_out_strs(o, IPP_TAG_KEYWORD, "media-col-supported",
                      (const char *[]){"media-bottom-margin", "media-left-margin", "media-right-margin", "media-size",
                                       "media-size-name", "media-source", "media-top-margin", "media-type", NULL});
     if (W("media-default"))
-        ipp_out_str(o, IPP_TAG_KEYWORD, "media-default", "iso_a4_210x297mm");
+        ipp_out_str(o, IPP_TAG_KEYWORD, "media-default", drv->papers[0].pwg);
     if (W("media-ready"))
-        ipp_out_strs(o, IPP_TAG_KEYWORD, "media-ready",
-                     (const char *[]){"iso_a4_210x297mm", "na_letter_8.5x11in", NULL});
+        ipp_out_strs(o, IPP_TAG_KEYWORD, "media-ready", media_names(papers));
     if (W("media-size-supported")) {
-        ipp_out_coll_begin(o, "media-size-supported");
-        ipp_out_member(o, "x-dimension");
-        ipp_out_int(o, IPP_TAG_INTEGER, NULL, 21000);
-        ipp_out_member(o, "y-dimension");
-        ipp_out_int(o, IPP_TAG_INTEGER, NULL, 29700);
-        ipp_out_coll_end(o);
-        ipp_out_coll_begin(o, NULL);
-        ipp_out_member(o, "x-dimension");
-        ipp_out_int(o, IPP_TAG_INTEGER, NULL, 21590);
-        ipp_out_member(o, "y-dimension");
-        ipp_out_int(o, IPP_TAG_INTEGER, NULL, 27940);
-        ipp_out_coll_end(o);
+        for (int i = 0; i < drv->npapers; i++) {
+            ipp_out_coll_begin(o, i ? NULL : "media-size-supported");
+            ipp_out_member(o, "x-dimension");
+            ipp_out_int(o, IPP_TAG_INTEGER, NULL, drv->papers[i].width);
+            ipp_out_member(o, "y-dimension");
+            ipp_out_int(o, IPP_TAG_INTEGER, NULL, drv->papers[i].height);
+            ipp_out_coll_end(o);
+        }
     }
     if (W("media-source-supported"))
         ipp_out_str(o, IPP_TAG_KEYWORD, "media-source-supported", "auto");
     if (W("media-supported"))
-        ipp_out_strs(o, IPP_TAG_KEYWORD, "media-supported",
-                     (const char *[]){"iso_a4_210x297mm", "na_letter_8.5x11in", NULL});
+        ipp_out_strs(o, IPP_TAG_KEYWORD, "media-supported", media_names(papers));
     if (W("media-type-supported"))
         ipp_out_str(o, IPP_TAG_KEYWORD, "media-type-supported", "stationery");
     if (W("multiple-document-handling-supported"))
@@ -585,17 +598,21 @@ static void add_printer_attrs(ipp_out_t *o, const conn_t *c, const filter_t *f)
         ipp_out_bool(o, "page-ranges-supported", false);
     if (W("pages-per-minute"))
         ipp_out_int(o, IPP_TAG_INTEGER, "pages-per-minute", 8);
-    if (W("pages-per-minute-color"))
+    if (drv->color && W("pages-per-minute-color"))
         ipp_out_int(o, IPP_TAG_INTEGER, "pages-per-minute-color", 4);
     if (W("pdl-override-supported"))
         ipp_out_str(o, IPP_TAG_KEYWORD, "pdl-override-supported", "attempted");
     if (W("preferred-attributes-supported"))
         ipp_out_bool(o, "preferred-attributes-supported", false);
     if (W("print-color-mode-default"))
-        ipp_out_str(o, IPP_TAG_KEYWORD, "print-color-mode-default", "color");
-    if (W("print-color-mode-supported"))
-        ipp_out_strs(o, IPP_TAG_KEYWORD, "print-color-mode-supported",
-                     (const char *[]){"auto", "color", "monochrome", NULL});
+        ipp_out_str(o, IPP_TAG_KEYWORD, "print-color-mode-default", drv->color ? "color" : "monochrome");
+    if (W("print-color-mode-supported")) {
+        if (drv->color)
+            ipp_out_strs(o, IPP_TAG_KEYWORD, "print-color-mode-supported",
+                         (const char *[]){"auto", "color", "monochrome", NULL});
+        else
+            ipp_out_str(o, IPP_TAG_KEYWORD, "print-color-mode-supported", "monochrome");
+    }
     if (W("print-content-optimize-default"))
         ipp_out_str(o, IPP_TAG_KEYWORD, "print-content-optimize-default", "auto");
     if (W("print-content-optimize-supported"))
@@ -648,11 +665,10 @@ static void add_printer_attrs(ipp_out_t *o, const conn_t *c, const filter_t *f)
     if (W("printer-organizational-unit"))
         ipp_out_str(o, IPP_TAG_TEXT, "printer-organizational-unit", "");
     if (W("printer-resolution-default"))
-        ipp_out_res(o, "printer-resolution-default", 600, 600);
-    if (W("printer-resolution-supported")) {
-        ipp_out_res(o, "printer-resolution-supported", 300, 300);
-        ipp_out_res(o, NULL, 600, 600);
-    }
+        ipp_out_res(o, "printer-resolution-default", drv->resolutions[drv->nresolutions - 1],
+                    drv->resolutions[drv->nresolutions - 1]);
+    if (W("printer-resolution-supported"))
+        resolutions(o, "printer-resolution-supported");
     if (W("printer-state"))
         ipp_out_int(o, IPP_TAG_ENUM, "printer-state", printer_state(&st));
     if (W("printer-state-change-date-time"))
@@ -726,15 +742,13 @@ static void add_printer_attrs(ipp_out_t *o, const conn_t *c, const filter_t *f)
         snprintf(uri, sizeof(uri), "urn:uuid:%s", cfg->uuid);
         ipp_out_str(o, IPP_TAG_URI, "printer-uuid", uri);
     }
-    if (W("pwg-raster-document-resolution-supported")) {
-        ipp_out_res(o, "pwg-raster-document-resolution-supported", 300, 300);
-        ipp_out_res(o, NULL, 600, 600);
-    }
+    if (W("pwg-raster-document-resolution-supported"))
+        resolutions(o, "pwg-raster-document-resolution-supported");
     if (W("pwg-raster-document-sheet-back"))
         ipp_out_str(o, IPP_TAG_KEYWORD, "pwg-raster-document-sheet-back", "normal");
     if (W("pwg-raster-document-type-supported"))
         ipp_out_strs(o, IPP_TAG_KEYWORD, "pwg-raster-document-type-supported",
-                     (const char *[]){"sgray_8", "srgb_8", NULL});
+                     drv->color ? (const char *[]){"sgray_8", "srgb_8", NULL} : (const char *[]){"sgray_8", NULL});
     if (W("queued-job-count"))
         ipp_out_int(o, IPP_TAG_INTEGER, "queued-job-count", s_active ? 1 : 0);
     if (W("sides-default"))
@@ -747,7 +761,8 @@ static void add_printer_attrs(ipp_out_t *o, const conn_t *c, const filter_t *f)
         ipp_out_str(o, IPP_TAG_KEYWORD, "uri-security-supported", "none");
     if (W("urf-supported")) {
         // comma separated list -> 1setOf keyword
-        char urf[] = AIRPRINT_URF;
+        char urf[64];
+        printer_driver_urf(drv, urf, sizeof(urf));
         char *save = NULL;
         int i = 0;
         for (char *t = strtok_r(urf, ",", &save); t; t = strtok_r(NULL, ",", &save), i++)
@@ -874,57 +889,55 @@ static job_t *job_create(const ipp_request_t *req)
 }
 
 // ===========================================================================
-// print pipeline: raster -> bjl
+// print pipeline: raster -> printer driver -> job_write
 
 typedef struct {
     job_t *job;
     int64_t out_us;             // time spent in the printer output hook
     int64_t render_us;          // time spent converting lines (render + dither + compress)
-    bjl_job_t bjl;
-    bjl_render_t render;
-    bool started;
+    uint32_t bytes_out;         // printer data so far
+    printer_io_t io;
+    void *drv_job;              // the driver's job, once the first page started
     int dpi;
     int err;                    // first failure, an IPP status
 } pipe_t;
 
-static int bjl_sink(void *user, const uint8_t *data, size_t len)
+static int pipe_write(void *ctx, const uint8_t *data, size_t len)
 {
-    pipe_t *p = user;
+    pipe_t *p = ctx;
     int64_t t0 = now_us();
     int r = s_cfg->job_write(s_cfg->ctx, data, len) < 0 ? -1 : 0;
     p->out_us += now_us() - t0;
+    p->bytes_out += (uint32_t)len;
     return r;
+}
+
+static int pipe_sync(void *ctx, const char *what)
+{
+    return s_cfg->job_sync ? s_cfg->job_sync(s_cfg->ctx, what) : 0;
 }
 
 static int pipe_page_begin(void *user, const raster_page_t *pg)
 {
     pipe_t *p = user;
+    const printer_driver_t *d = s_cfg->driver;
     if (p->job->cancel)
         return 1;
-    if (pg->dpi != 300 && pg->dpi != 600) {
+    if (!printer_driver_has_dpi(d, pg->dpi)) {
         LOGW("page %d: unsupported resolution %d dpi", pg->page, pg->dpi);
         p->err = IPP_DOCUMENT_FORMAT_ERROR;
         return 2;
     }
-    if (!p->started) {
-        // paper from the page size: Letter is 11 in tall, A4 11.69 in
-        float h_in = (float)pg->height / pg->dpi;
-        bjl_paper_id_t paper = (h_in < 11.35f) ? BJL_PAPER_LETTER : BJL_PAPER_A4;
-        bjl_mode_id_t mode = pg->dpi == 300 ? BJL_MODE_300DPI : BJL_MODE_600DPI;
-        if (bjl_job_init(&p->bjl, mode, paper, bjl_sink, p) || bjl_render_init(&p->render, &p->bjl)) {
+    if (!p->drv_job) {
+        int paper = printer_driver_paper_for(d, pg->height, pg->dpi);
+        p->io = (printer_io_t){.write = pipe_write, .sync = pipe_sync, .ctx = p};
+        p->dpi = pg->dpi;
+        LOGI("job %d: %s %d dpi, %s", p->job->id, d->papers[paper].name, pg->dpi, pg->bytes_pp == 3 ? "color" : "gray");
+        p->drv_job = d->job_begin(&p->io, pg->dpi, paper);
+        if (!p->drv_job) {
             p->err = IPP_INTERNAL_ERROR;
             return 3;
         }
-        p->started = true;
-        p->dpi = pg->dpi;
-        LOGI("job %d: %s %s, %s", p->job->id, bjl_get_paper(paper)->name, p->bjl.mode->name,
-             pg->bytes_pp == 3 ? "color" : "gray");
-        bjl_emit_start_job(&p->bjl);
-        if (s_cfg->job_sync && s_cfg->job_sync(s_cfg->ctx, "StartJob"))
-            p->bjl.err = -1;
-        bjl_emit_mode_shift(&p->bjl);
-        if (!p->bjl.err && s_cfg->job_sync && s_cfg->job_sync(s_cfg->ctx, "ModeShift"))
-            p->bjl.err = -1;
     } else if (pg->dpi != p->dpi) {
         LOGW("page %d: resolution changed within the job", pg->page);
         p->err = IPP_DOCUMENT_FORMAT_ERROR;
@@ -932,9 +945,7 @@ static int pipe_page_begin(void *user, const raster_page_t *pg)
     }
     p->job->line = 0;
     p->job->height = pg->height;
-    bjl_page_begin(&p->bjl);
-    bjl_render_page(&p->render, pg->width, pg->height, pg->bytes_pp);
-    return p->bjl.err ? 4 : 0;
+    return d->page_begin(p->drv_job, pg->width, pg->height, pg->bytes_pp) ? 4 : 0;
 }
 
 static int pipe_line(void *user, int y, const uint8_t *px)
@@ -947,7 +958,7 @@ static int pipe_line(void *user, int y, const uint8_t *px)
         vTaskDelay(1);      // let the idle task run (task watchdog)
 #endif
     int64_t t0 = now_us();
-    int r = bjl_render_line(&p->render, y, px) ? 4 : 0;
+    int r = s_cfg->driver->page_line(p->drv_job, y, px) ? 4 : 0;
     p->render_us += now_us() - t0;
     p->job->line = y + 1;
     return r;
@@ -956,12 +967,12 @@ static int pipe_line(void *user, int y, const uint8_t *px)
 static int pipe_page_end(void *user, const raster_page_t *pg)
 {
     pipe_t *p = user;
-    if (bjl_page_end(&p->bjl))
+    if (s_cfg->driver->page_end(p->drv_job))
         return 4;
     pthread_mutex_lock(&s_lock);
     p->job->impressions++;
     pthread_mutex_unlock(&s_lock);
-    LOGI("job %d: page %d done (%u bytes so far)", p->job->id, pg->page, (unsigned)p->bjl.bytes_out);
+    LOGI("job %d: page %d done (%u bytes so far)", p->job->id, pg->page, (unsigned)p->bytes_out);
     return 0;
 }
 
@@ -998,14 +1009,13 @@ static int print_document(conn_t *c, job_t *j)
     doc_reader_t rd = {c, j, 0};
     raster_cb_t cb = {pipe_page_begin, pipe_line, pipe_page_end};
     int64_t t_start = now_us();
-    uint64_t prof[4];
-    bjl_render_profile(prof, true);
     int r = raster_decode(doc_read, &rd, &cb, p);
-    bjl_render_profile(prof, false);
-#ifdef ESP_PLATFORM
-    LOGI("job %d: render cycles: convert %.2f s, dither %.2f s, compress+emit %.2f s over %llu inked lines", j->id,
-         prof[0] / 240e6, prof[1] / 240e6, prof[2] / 240e6, (unsigned long long)prof[3]);
-#endif
+    if (p->drv_job && s_cfg->driver->job_stats) {
+        char stats[160];
+        s_cfg->driver->job_stats(p->drv_job, stats, sizeof(stats));
+        if (stats[0])
+            LOGI("job %d: %s", j->id, stats);
+    }
     int64_t t_total = now_us() - t_start;
     LOGI("job %d: %.1f s: %.1f s waiting for data (%.0f KB/s), %.1f s printer output, %.1f s rendering, "
          "%.1f s decoding", j->id, t_total / 1e6, rd.wait_us / 1e6,
@@ -1015,20 +1025,12 @@ static int print_document(conn_t *c, job_t *j)
     bool canceled = j->cancel;
     bool ok = r > 0 && !canceled;
     bool link_ok = true;
-    if (p->started) {
-        // finish cleanly whatever happened (cancel, bad data, client gone):
-        // eject a partly printed sheet and close the Canon job
-        if (p->bjl.in_page && !p->bjl.err)
-            bjl_page_end(&p->bjl);
-        if (!p->bjl.err)
-            bjl_emit_end_job(&p->bjl);
-        if (!p->bjl.err && s_cfg->job_sync)
-            s_cfg->job_sync(s_cfg->ctx, "EndJob");
-        link_ok = !p->bjl.err;
+    if (p->drv_job) {
+        // the driver finishes the job whatever happened (cancel, bad data,
+        // client gone): a partly printed sheet is ejected
+        link_ok = s_cfg->driver->job_end(p->drv_job) == 0;
         if (!link_ok)
             ok = false;
-        bjl_render_free(&p->render);
-        bjl_job_free(&p->bjl);
     }
     // ok = false makes the platform reset the printer
     if (s_cfg->job_close)
@@ -1051,7 +1053,7 @@ static int print_document(conn_t *c, job_t *j)
             j->reason = bad_data ? "document-unprintable-error" : "aborted-by-system";
             if (r == RASTER_ERR_IO)
                 status = IPP_OK;    // client went away; nobody reads the status
-            else if (bad_data && !p->started)
+            else if (bad_data && !p->drv_job)
                 status = IPP_DOCUMENT_FORMAT_NOT_SUPPORTED;  // not URF/PWG at all (autodetect failed)
             else
                 status = IPP_DOCUMENT_FORMAT_ERROR;

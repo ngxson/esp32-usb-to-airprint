@@ -59,6 +59,10 @@ static void on_printer(bool connected, const usb_printer_info_t *info)
 {
     if (connected) {
         ESP_LOGI(TAG, "printer ready: %s %s", info->manufacturer, info->product);
+        const printer_driver_t *drv = print_job_driver();
+        if (drv->usb_vid && (info->vid != drv->usb_vid || info->pid != drv->usb_pid))
+            ESP_LOGW(TAG, "printer %04x:%04x is not the one the \"%s\" driver expects (%04x:%04x)", info->vid,
+                     info->pid, drv->id, drv->usb_vid, drv->usb_pid);
         scan_service_recalibrate();     // maybe powered off and on: calibrate again
     }
     show_idle_state();
@@ -75,7 +79,7 @@ static void print_task(void *arg)
     bool dry_run = (bool)(intptr_t)arg;
     print_stats_t st;
     status_led_set(LED_BUSY);
-    esp_err_t err = print_job_test_page(dry_run, print_job_default_mode(), &st);
+    esp_err_t err = print_job_test_page(dry_run, print_job_default_dpi(), &st);
     if (dry_run)
         ESP_LOGI(TAG, "dry run done: %lu bytes, crc32 %08lx, %lu ms (%s)", (unsigned long)st.bytes,
                  (unsigned long)st.crc32, (unsigned long)st.ms, esp_err_to_name(err));

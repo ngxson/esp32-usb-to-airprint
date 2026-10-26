@@ -16,6 +16,8 @@
 #include "freertos/task.h"
 #include "local_config.h"
 #include "mdns.h"
+#include "print_job.h"
+#include "printer_driver.h"
 #include "scan_service.h"
 #include "shared_buf.h"
 #include "status_led.h"
@@ -54,23 +56,6 @@ static int64_t s_dev_t0;
 // ---------------------------------------------------------------------------
 // printer status
 
-// Canon "CIR:CL=000,BK=UK" -> remaining ink in percent, -2 = unknown
-static int ink_level(const char *data, const char *key)
-{
-    const char *cir = strstr(data, "CIR:");
-    if (!cir)
-        return -2;
-    const char *p = strstr(cir, key);
-    const char *end = strchr(cir, ';');
-    if (!p || (end && p > end))
-        return -2;
-    p += strlen(key);
-    if (*p < '0' || *p > '9')
-        return -2;      // "UK": unknown (e.g. refilled cartridge)
-    int v = atoi(p);
-    return v > 100 ? 100 : v;
-}
-
 static void add_reason(airprint_status_t *st, const char *reason)
 {
     if (st->nreasons < (int)(sizeof(st->reasons) / sizeof(st->reasons[0])))
@@ -87,42 +72,20 @@ static void get_status(void *ctx, airprint_status_t *st)
     if (scanning)
         snprintf(st->message, sizeof(st->message), "Scanning");
 
+    // the printer's own status (reasons, message, ink) as its driver reads it
     usb_printer_status_t cs;
     bool have = usb_printer_get_status(&cs);
+    const printer_driver_t *drv = print_job_driver();
+    if (drv->status)
+        drv->status(have ? cs.state : NULL, have ? cs.detail : NULL, have ? cs.data : NULL, st);
     const char *d = have ? cs.detail : "";
-    if (strstr(d, "MarkerSupplyEmpty") || strstr(d, "MarkerSupplyMissing")) {
-        add_reason(st, "marker-supply-empty-error");
-        snprintf(st->message, sizeof(st->message), "Ink cartridge empty or missing");
-    } else if (strstr(d, "MarkerSupplyAttention") || strstr(d, "MarkerSupplyLow")) {
-        add_reason(st, "marker-supply-low-warning");
-        snprintf(st->message, sizeof(st->message), "Ink low");
-    }
-    if (strstr(d, "MediaEmpty") || strstr(d, "MediaNeeded")) {
-        add_reason(st, "media-empty-error");
-        snprintf(st->message, sizeof(st->message), "Out of paper");
-    }
-    if (strstr(d, "MediaJam")) {
-        add_reason(st, "media-jam-error");
-        snprintf(st->message, sizeof(st->message), "Paper jam");
-    }
-    if (strstr(d, "DoorOpen") || strstr(d, "CoverOpen")) {
-        add_reason(st, "cover-open-error");
-        snprintf(st->message, sizeof(st->message), "Cover open");
-    }
+    // USB printer class port status: paper empty
     uint8_t port = 0;
     if (!s_job_running && !scanning && usb_printer_port_status(&port) == ESP_OK && (port & 0x20) &&
         !strstr(d, "MediaEmpty")) {
         add_reason(st, "media-empty-error");
         snprintf(st->message, sizeof(st->message), "Out of paper");
     }
-
-    st->nsupplies = 2;
-    st->supply[0].name = "Black";
-    st->supply[0].color = "#000000";
-    st->supply[0].level = have ? ink_level(cs.data, "BK=") : -2;
-    st->supply[1].name = "Color";
-    st->supply[1].color = "#00FFFF#FF00FF#FFFF00";
-    st->supply[1].level = have ? ink_level(cs.data, "CL=") : -2;
 }
 
 // ---------------------------------------------------------------------------
@@ -144,22 +107,9 @@ static int job_write(void *ctx, const uint8_t *data, size_t len)
     return usb_printer_write(data, len) == ESP_OK ? 0 : -1;
 }
 
-// same handshake as the Canon driver: wait for each IVEC reply, but go on
-// without it (Gutenprint never waits)
 static int job_sync(void *ctx, const char *what)
 {
-    if (usb_printer_flush() != ESP_OK)
-        return -1;
-    // EndJob is answered when the page is done: keeps the job "processing"
-    uint32_t timeout = strcmp(what, "EndJob") == 0 ? 180000 : 5000;
-    esp_err_t err = usb_printer_wait_response(what, timeout);
-    if (err == ESP_OK)
-        ESP_LOGI(TAG, "%s acknowledged", what);
-    else if (err == ESP_ERR_TIMEOUT)
-        ESP_LOGW(TAG, "no %s reply, continuing", what);
-    else if (err != ESP_ERR_NOT_SUPPORTED)
-        return -1;
-    return 0;
+    return print_job_sync(what);
 }
 
 static void job_close(void *ctx, bool ok)
@@ -313,7 +263,7 @@ static void dev_scan_close(void *ctx)
 
 static bool scan_available(void *ctx)
 {
-    return usb_scanner_present();
+    return print_job_driver()->scanner && usb_scanner_present();
 }
 
 static int scan_open(void *ctx)
@@ -378,33 +328,36 @@ static esp_err_t start_mdns(const char *hostname)
     mdns_hostname_set(hostname);
     mdns_instance_name_set(PRINTER_NAME);
 
-    char adminurl[96];
+    const printer_driver_t *drv = s_cfg.driver;
+    char adminurl[96], product[64], urf[64];
     snprintf(adminurl, sizeof(adminurl), "http://%s.local/", hostname);
+    snprintf(product, sizeof(product), "(%s)", drv->usb_mdl);
+    printer_driver_urf(drv, urf, sizeof(urf));
     // Bonjour Printing / AirPrint TXT record
     mdns_txt_item_t txt[] = {
         {"txtvers", "1"},
         {"qtotal", "1"},
         {"rp", "ipp/print"},
         {"ty", s_cfg.make_model},
-        {"product", "(MG2500 series)"},
+        {"product", product},
         {"note", ""},
         {"adminurl", adminurl},
         {"priority", "50"},
         {"pdl", AIRPRINT_PDL},
-        {"URF", AIRPRINT_URF},
+        {"URF", urf},
         {"UUID", s_uuid},
-        {"Color", "T"},
+        {"Color", drv->color ? "T" : "F"},
         {"Duplex", "F"},
         {"Copies", "F"},
         {"kind", "document"},
         {"PaperMax", "<legal-A4"},     // up to A4
-        {"usb_MFG", "Canon"},
-        {"usb_MDL", "MG2500 series"},
+        {"usb_MFG", drv->usb_mfg},
+        {"usb_MDL", drv->usb_mdl},
         {"air", "none"},
         {"Transparent", "T"},
         {"Binary", "T"},
         {"TBCP", "F"},
-        {"Scan", "T"},     // the eSCL scanner below, same UUID
+        {"Scan", drv->scanner ? "T" : "F"},    // the eSCL scanner below, same UUID
         {"Fax", "F"},
     };
     err = mdns_service_add(PRINTER_NAME, "_ipp", "_tcp", IPP_PORT, txt, sizeof(txt) / sizeof(txt[0]));
@@ -414,6 +367,10 @@ static esp_err_t start_mdns(const char *hostname)
     mdns_service_subtype_add_for_host(PRINTER_NAME, "_ipp", "_tcp", NULL, "_universal");
     mdns_service_subtype_add_for_host(PRINTER_NAME, "_ipp", "_tcp", NULL, "_print");
 
+    if (!drv->scanner) {
+        ESP_LOGI(TAG, "announced \"%s\" as %s.local:%d", PRINTER_NAME, hostname, IPP_PORT);
+        return ESP_OK;
+    }
     // eSCL scanner (AirScan): macOS Image Capture / Preview, sane-airscan, Windows
     char icon[96];
     snprintf(icon, sizeof(icon), "http://%s.local/icon.png", hostname);
@@ -450,11 +407,16 @@ esp_err_t airprint_esp_start(const char *hostname, void (*on_job_state)(bool pri
     const esp_timer_create_args_t targs = {.callback = cancel_timeout, .name = "ipp_cancel"};
     esp_timer_create(&targs, &s_cancel_timer);
 
+    const printer_driver_t *drv = print_job_driver();
+    static char device_id[128];
+    snprintf(device_id, sizeof(device_id), "MFG:%s;MDL:%s;CMD:URF,PWG;CLS:PRINTER;", drv->usb_mfg, drv->usb_mdl);
+    ESP_LOGI(TAG, "printer driver: %s (%s)", drv->id, drv->make_model);
     s_cfg = (airprint_config_t){
         .name = PRINTER_NAME,
-        .make_model = "Canon MG2500 series",
+        .make_model = drv->make_model,
         .uuid = s_uuid,
-        .device_id = "MFG:Canon;MDL:MG2500 series;CMD:URF,PWG;CLS:PRINTER;",
+        .device_id = device_id,
+        .driver = drv,
         .port = IPP_PORT,
         .web_port = WEB_PORT,
         .get_status = get_status,
@@ -473,7 +435,7 @@ esp_err_t airprint_esp_start(const char *hostname, void (*on_job_state)(bool pri
         .close = scan_close,
         .io = {.write = scan_write, .read = scan_read, .sleep_ms = scan_sleep},
         .state = job_state,
-        .make_model = "Canon MG2500 series",
+        .make_model = drv->make_model,
         .uuid = s_uuid,
     };
     s_cfg.http_handler = http_handler;

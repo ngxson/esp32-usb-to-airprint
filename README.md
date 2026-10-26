@@ -28,11 +28,11 @@ Optionally: a SSD1315 OLED screen and a 3D-printed case, see later in this tutor
 
 ## Setup
 
-Step 1: **Hardware.** Plug the ESP32-S3 into your computer via the COM port on the ESP32 board (NOT the port labelled "USB")
+**Step 1: Hardware.** Plug the ESP32-S3 into your computer via the COM port on the ESP32 board (NOT the port labelled "USB")
 
 ![](./docs/IMG_3538.jpeg)
 
-Step 2: **Settings.** Build once (`pio run`): this creates `.env`. Edit it:
+**Step 2: Settings.** Build once (`pio run`): this creates `.env`. Edit it:
    ```
    WIFI_SSID=your-network
    WIFI_PASSWORD=your-password
@@ -41,7 +41,8 @@ Step 2: **Settings.** Build once (`pio run`): this creates `.env`. Edit it:
    MODE=debug
    ```
    `MODE=debug` lets you update the board over WiFi later (see below); `MODE=normal` does without. `.env` is git-ignored, so your WiFi password stays local.
-Step 3: **Flash.** Connect the board's **COM** port to your computer and run `pio run -t upload`. PlatformIO finds the board's serial port; if several are connected, add `--upload-port /dev/cu.usbmodem…`.
+
+**Step 3: Flash.** Connect the board's **COM** port to your computer and run `pio run -t upload`. PlatformIO finds the board's serial port; if several are connected, add `--upload-port /dev/cu.usbmodem…`.
 
 ## Using it
 
@@ -85,3 +86,7 @@ Set `MODE=dev` and flash: print jobs are processed but not printed, and scans sh
 On the computer, without the board: `make -C host && cd host && ./airprint_host`, then open http://localhost:8631/ (an emulated printer and scanner). To work on the web app with live reloading: `cd web && npm run dev` (it talks to that server; `DEVICE=http://<board IP> npm run dev` talks to the board).
 
 Technical details are in [AGENTS.md](AGENTS.md).
+
+## Adding a printer
+
+Each printer model is a driver in `components/printers/`: copy `canon_mg2500.c` and select yours with `CONFIG_PRINTER_DRIVER`. See [AGENTS.md](AGENTS.md) for details.

@@ -6,7 +6,7 @@
 //     n > 128 : 257 - n literal pixels follow
 #include "raster.h"
 
-#include "canon_bjl.h"    // BJL_HOT
+#include "mem.h"
 
 #include <stdbool.h>
 #include <stdlib.h>
@@ -23,7 +23,7 @@ typedef struct {
 } reader_t;
 
 // Buffered exact read; returns 0 ok, 1 clean EOF before any byte, -1 error/truncated.
-BJL_HOT static int rd(reader_t *r, uint8_t *out, size_t n)
+AP_HOT static int rd(reader_t *r, uint8_t *out, size_t n)
 {
     size_t got = 0;
     while (got < n) {
@@ -55,11 +55,11 @@ static uint32_t be32(const uint8_t *p)
     return (uint32_t)p[0] << 24 | (uint32_t)p[1] << 16 | (uint32_t)p[2] << 8 | p[3];
 }
 
-BJL_HOT static int decode_page(reader_t *r, const raster_page_t *pg, const raster_cb_t *cb, void *user)
+AP_HOT static int decode_page(reader_t *r, const raster_page_t *pg, const raster_cb_t *cb, void *user)
 {
     const int bpp = pg->bytes_pp;
     const size_t line_bytes = (size_t)pg->width * bpp;
-    uint8_t *line = BJL_MALLOC_FAST(line_bytes);
+    uint8_t *line = AP_MALLOC_FAST(line_bytes);
     if (!line)
         return RASTER_ERR_NOMEM;
     int ret = cb->page_begin ? cb->page_begin(user, pg) : 0;

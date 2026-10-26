@@ -12,7 +12,7 @@
 #include <time.h>
 #include <unistd.h>
 
-#include "canon_bjl.h"      // BJL_MALLOC_BULK
+#include "mem.h"
 
 #ifdef ESP_PLATFORM
 #include "esp_log.h"
@@ -31,7 +31,7 @@
 #define WAKE_MS 250             // how often a poke is noticed
 #define KEEPALIVE_S 15
 // the snapshot buffers live in PSRAM on the board: internal RAM is scarce
-#define ALLOC(n) BJL_MALLOC_BULK(n)
+#define ALLOC(n) AP_MALLOC_BULK(n)
 
 static struct {
     const char *key;

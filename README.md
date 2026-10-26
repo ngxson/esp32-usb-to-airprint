@@ -90,3 +90,9 @@ Technical details are in [AGENTS.md](AGENTS.md).
 ## Adding a printer
 
 Each printer model is a driver in `components/printers/`: copy `canon_mg2500.c` and select yours with `CONFIG_PRINTER_DRIVER`. See [AGENTS.md](AGENTS.md) for details.
+
+## License
+
+MIT, see [LICENSE](LICENSE).
+
+The printer and scanner protocols follow [Gutenprint](https://gimp-print.sourceforge.io/) and [SANE](http://www.sane-project.org/)'s pixma backend. The JPEG encoder's DCT is a translation of libjpeg's `jfdctint.c`: this software is based in part on the work of the Independent JPEG Group. The web UI bundles [Svelte](https://svelte.dev/) (MIT) and [pdf.js](https://mozilla.github.io/pdf.js/) (Apache-2.0).

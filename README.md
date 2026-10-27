@@ -68,22 +68,23 @@ Optionally: a SSD1315 OLED screen and a 3D-printed case, see later in this tutor
 
 **Step 3: Flash.** Connect the board's **COM** port to your computer and run `pio run -t upload`. PlatformIO finds the board's serial port; if several are connected, add `--upload-port /dev/cu.usbmodem…`.
 
-**Step 4: WiFi.** On its first start the board opens its own WiFi network, **`canon-mg2500-setup`** (your `HOSTNAME` followed by `-setup`):
+**Step 4: WiFi.** On its first start the board opens its own WiFi network, **`Printer-Setup-XXXX`** (`XXXX` is different for each board):
 
-1. On your phone or computer, join `canon-mg2500-setup`. A setup page opens by itself (if it doesn't, open http://192.168.4.1/).
+1. On your phone or computer, join `Printer-Setup-XXXX`. A setup page opens by itself (if it doesn't, open http://192.168.4.1/).
 2. Pick your network, type its password and tap **Connect**. Only 2.4 GHz networks work.
 3. The board joins your network, remembers it and restarts; the setup network goes away. Join your own WiFi again: the printer is at `http://canon-mg2500.local/`.
 
-If the password was wrong, the page says so and you can try again. The OLED screen, if you have one, shows the setup network's name.
+If the password was wrong, the page says so and you can try again. The OLED screen, if you have one, shows the setup network's full name.
 
-To change the network later, hold the BOOT button for 10 seconds while nothing is printing or scanning: the board forgets the network and opens the setup network again. It also opens by itself when the saved network has not answered for 5 minutes (a new router, a new password); meanwhile the board keeps trying the saved network and goes back to it when it returns.
+To change the network later, hold the BOOT button for 10 seconds while nothing is printing or scanning: the board forgets the network and opens the setup network again. If the board loses its network (a router outage), it keeps trying to reconnect on its own.
 
 <details>
 <summary>Other WiFi options</summary>
 
-- `SETUP_PASSWORD` in `.env` (at least 8 characters) protects the setup network with a password; by default it is open, like most setup networks.
-- `WIFI_SSID` and `WIFI_PASSWORD` in `.env` build a network into the firmware, for boards you flash yourself and never set up by phone. A network chosen on the setup page wins over them.
-- `CONFIG_WIFI_SETUP_AFTER_MIN` (`pio run -t menuconfig`, "Printer server") sets the 5 minutes; 0 never opens the setup network for a lost network.
+- `SETUP_PASSWORD` in `.env` (8 to 63 characters) protects the setup network with a password; by default it is open, like most setup networks. With a password, the setup network also opens by itself when the saved network has not answered for 5 minutes (a new router, a new password); the board keeps trying the saved network meanwhile and goes back to it when it returns. Without a password this stays off, so that nobody nearby can knock the board off your WiFi and point it at their own network.
+- `WIFI_SSID` and `WIFI_PASSWORD` in `.env` build a network into the firmware, for boards you flash yourself and never set up by phone. A network chosen on the setup page wins over them. Holding BOOT only forgets a network chosen on the page: the built-in one comes back after a power cycle.
+- `CONFIG_WIFI_SETUP_AFTER_MIN` (`pio run -t menuconfig`, "Printer server") sets the 5 minutes; 0 turns that off.
+- Updating over WiFi (`MODE=debug`) to this version: keep `WIFI_SSID` in `.env` for that update. A new image that cannot join a network rolls back to the old one after 3 minutes, unless the setup is finished first.
 
 </details>
 

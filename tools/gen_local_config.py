@@ -77,6 +77,9 @@ def main():
     if text != old:     # only touch the file when something changed (avoids rebuilds)
         with open(OUT_FILE, "w", encoding="utf-8") as f:
             f.write(text)
+    n = len(values.get("SETUP_PASSWORD", "").encode("utf-8"))
+    if n and not 8 <= n <= 63:
+        print("Warning: SETUP_PASSWORD needs 8 to 63 characters; the setup network stays open")
     if not values.get("WIFI_SSID"):
         print("No WIFI_SSID in .env: the board opens its setup network to choose one")
 

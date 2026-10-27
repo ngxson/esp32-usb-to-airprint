@@ -182,6 +182,21 @@ static void test_page(void)
     wifi_setup_page(&p, buf, sizeof(buf));
     CHECK(strstr(buf, "No network found") && strstr(buf, "name=other"));
 
+    // 20 names of 32 quotes (6 bytes each when escaped, twice per name): the list is cut, the
+    // form is whole
+    static wifi_setup_network_t odd[WIFI_SETUP_MAX_NETWORKS];
+    for (int i = 0; i < WIFI_SETUP_MAX_NETWORKS; i++) {
+        memset(odd[i].ssid, '"', 32);
+        odd[i].ssid[32] = 0;
+        odd[i].rssi = -90;     // one bar: the most markup
+        odd[i].secure = true;
+    }
+    p = page(WIFI_SETUP_IDLE);
+    p.networks = odd;
+    p.n_networks = WIFI_SETUP_MAX_NETWORKS;
+    n = wifi_setup_page(&p, buf, 12288);
+    CHECK(n < 12287 && strstr(buf, "name=password") && strstr(buf, "</form>") && strstr(buf, "</html>"));
+
     // a short buffer: cut, still a string
     p = page(WIFI_SETUP_IDLE);
     CHECK(wifi_setup_page(&p, buf, 100) == 99 && strlen(buf) == 99);

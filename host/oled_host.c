@@ -190,7 +190,7 @@ static void render(const char *dir)
     s.wifi_configured = false;
     s.ip[0] = 0;
     s.started = false;
-    s.setup_ap = "canon-mg2500-setup";
+    s.setup_ap = "Printer-Setup-A1B2";
     s.setup_ip = "192.168.4.1";
     sc[n++] = (scenario_t){"wifi-setup", s};
 

@@ -12,7 +12,8 @@
 // User button (GPIO5): wired and debounced, but does nothing yet: a free
 //      button for your own feature (on_user_button below).
 // WiFi: joins the network chosen on the setup page (or from .env); without
-//      one, opens the setup network "<host>-setup" with a captive portal (wifi.h).
+//      one, opens the setup network "Printer-Setup-XXXX" with a captive portal
+//      (wifi.h).
 // AirPrint: serves IPP on port 631; the web UI is at http://<host>/ (port 80,
 //      and 631).
 // Screen: an optional I2C OLED shows the IP address, the printer and what it

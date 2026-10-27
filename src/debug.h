@@ -30,5 +30,6 @@ esp_err_t debug_server_start(bool (*busy)(void));
 // For a freshly updated image (pending verification): waits until healthy()
 // has held for settle_s seconds, then marks the image valid; rolls back and
 // reboots if that does not happen within timeout_s. Returns at once for an
-// image that is already valid. Run it from its own task.
+// image that is already valid, or once something else marks it valid. Run it
+// from its own task.
 void debug_ota_confirm(bool (*healthy)(void), int settle_s, int timeout_s);

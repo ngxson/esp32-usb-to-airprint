@@ -62,11 +62,15 @@ static const char STYLE[] =
     "margin-top:1em}button.l{background:none;color:#0a66d8;padding:.4em 0}"
     ".foot{opacity:.7;font-size:.9em;margin-top:1.5em}";
 
+// room kept for the rest of the page after the list (the form's fields and buttons are about
+// 1 KB): odd names around must not push the password field out of the buffer
+#define TAIL_ROOM 1536
+
 static void network_list(out_t *o, const wifi_setup_page_t *p)
 {
     put(o, "<fieldset><legend>Network (2.4 GHz)</legend>");
     bool checked = false;
-    for (int i = 0; i < p->n_networks; i++) {
+    for (int i = 0; i < p->n_networks && o->n - o->len > TAIL_ROOM + 512; i++) {
         const wifi_setup_network_t *w = &p->networks[i];
         bool c = !checked && (p->ssid ? strcmp(p->ssid, w->ssid) == 0 : i == 0);
         checked |= c;

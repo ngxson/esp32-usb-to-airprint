@@ -211,7 +211,8 @@ static void oled_task(void *arg)
         }
 
         esp_err_t err = ESP_OK;
-        bool want_on = sleep_us == 0 || now - changed_at < sleep_us;
+        // the setup network's name stays up: it is what someone setting the board up looks for
+        bool want_on = sleep_us == 0 || now - changed_at < sleep_us || s_state.setup_ap;
         if (want_on && !on) {
             err = flush(true);
             if (err == ESP_OK)

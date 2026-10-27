@@ -9,7 +9,6 @@
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
-#include "local_config.h"
 #include "oled_ui.h"
 #include "scan_service.h"
 #include "sdkconfig.h"
@@ -156,7 +155,9 @@ static void gather(oled_state_t *st)
 {
     memset(st, 0, sizeof(*st));
     st->name = s_hostname;
-    st->wifi_configured = WIFI_SSID[0] != 0;
+    st->setup_ap = wifi_setup_ap();
+    st->setup_ip = wifi_setup_ip();
+    st->wifi_configured = !st->setup_ap;
     if (wifi_connected()) {
         wifi_get_ip(st->ip, sizeof(st->ip));
         st->rssi = wifi_rssi();

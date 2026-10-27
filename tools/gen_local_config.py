@@ -1,5 +1,5 @@
 """Generate src/local_config.h from .env.example (committed defaults) and .env
-(git-ignored local settings, e.g. WiFi credentials). .env is created from
+(git-ignored local settings, e.g. the printer's name). .env is created from
 .env.example if missing.
 
 Runs automatically before every PlatformIO build (extra_scripts in
@@ -62,7 +62,7 @@ def c_string(s):
 def main():
     if not os.path.exists(LOCAL_FILE):
         shutil.copyfile(EXAMPLE_FILE, LOCAL_FILE)
-        print("Created .env from .env.example: put your WiFi credentials in it")
+        print("Created .env from .env.example")
 
     values = parse(EXAMPLE_FILE) if os.path.exists(EXAMPLE_FILE) else {}
     values.update(parse(LOCAL_FILE))
@@ -78,7 +78,7 @@ def main():
         with open(OUT_FILE, "w", encoding="utf-8") as f:
             f.write(text)
     if not values.get("WIFI_SSID"):
-        print("Warning: WIFI_SSID is empty, set it in .env")
+        print("No WIFI_SSID in .env: the board opens its setup network to choose one")
 
 
 main()

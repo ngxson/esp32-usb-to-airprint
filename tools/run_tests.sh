@@ -20,11 +20,15 @@ make -C host -s
 host/bjl_host selftest
 host/scan_host selftest 2>/dev/null | tail -1
 host/oled_host selftest
+host/wifisetup_host selftest
 
 echo "== status screen (all screens in $OUT/oled.png)"
 rm -f $OUT/oled-*.pbm
 host/oled_host render $OUT
 python3 tools/oled_preview.py $OUT $OUT/oled.png
+
+echo "== WiFi setup page (every state in $OUT/wifi-setup-*.html)"
+host/wifisetup_host render $OUT
 
 echo "== scans from the emulated scanner (JPEGs in $OUT/)"
 for s in "150 a4" "300 a4" "300 letter" "600 letter"; do

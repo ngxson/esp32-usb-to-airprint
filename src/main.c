@@ -6,12 +6,15 @@
 // BOOT button (and a second one on GPIO4, the same): press = scan an A4 page
 //      at 150 dpi (kept on the device: every open web page shows it and saves
 //      it to its Files), double press = print an A4 colour test page (dry run
-//      without a printer), hold 2 s while printing or scanning = cancel. While
-//      the screen is off, a press only turns it on.
+//      without a printer), hold 2 s while printing or scanning = cancel, hold
+//      10 s when idle = forget the WiFi network (the setup network opens).
+//      While the screen is off, a press only turns it on.
 // User button (GPIO5): wired and debounced, but does nothing yet: a free
 //      button for your own feature (on_user_button below).
-// AirPrint: joins the WiFi from .env and serves IPP on port 631; the web UI
-//      is at http://<host>/ (port 80, and 631).
+// WiFi: joins the network chosen on the setup page (or from .env); without
+//      one, opens the setup network "<host>-setup" with a captive portal (wifi.h).
+// AirPrint: serves IPP on port 631; the web UI is at http://<host>/ (port 80,
+//      and 631).
 // Screen: an optional I2C OLED shows the IP address, the printer and what it
 //      is doing (oled.h); it sleeps when nothing changes, a press wakes it.
 // MODE=debug: also the remote log, crash dumps and firmware updates over
@@ -38,6 +41,7 @@
 static const char *TAG = "main";
 
 #define LONG_PRESS_MS 2000
+#define FORGET_WIFI_MS 10000    // hold this long when idle: forget the WiFi network
 #define DOUBLE_PRESS_MS 400     // a second press within this is a double press
 #define ERROR_SHOW_MS 3000
 
@@ -181,6 +185,8 @@ static void button_task(void *arg)
     int same = 0;
     TickType_t pressed_at = 0, released_at = 0;
     bool long_fired = false;
+    bool forget_fired = false;
+    bool idle_at_press = false; // a hold that canceled a job must not go on to forget the WiFi
     bool pending = false;       // a press waiting to see whether a second one follows
     bool waking = false;        // this press turned the screen on: it does nothing else
     // the user button
@@ -192,6 +198,8 @@ static void button_task(void *arg)
             if (down) {
                 pressed_at = xTaskGetTickCount();
                 long_fired = false;
+                forget_fired = false;
+                idle_at_press = !s_busy && !s_airprint_busy;
                 waking = oled_wake();
                 if (waking)
                     pending = false;
@@ -216,6 +224,12 @@ static void button_task(void *arg)
                 usb_printer_cancel();
                 scan_service_cancel();
             }
+        }
+        if (down && !forget_fired && !waking && idle_at_press &&
+            xTaskGetTickCount() - pressed_at >= pdMS_TO_TICKS(FORGET_WIFI_MS)) {
+            forget_fired = true;
+            if (!s_busy && !s_airprint_busy && !usb_printer_job_active())
+                wifi_forget();
         }
 
         if (debounce(is_down(CONFIG_USER_BUTTON_GPIO), &user_down, &user_same) && user_down && !oled_wake())
@@ -267,8 +281,10 @@ void app_main(void)
     ESP_LOGI(TAG, "ready: press BOOT (or GPIO%d) to scan, twice for a test page", CONFIG_PRINT_BUTTON2_GPIO);
 
     xTaskCreate(ota_confirm_task, "ota_confirm", 3072, NULL, 2, NULL);
-    // AirPrint; the printer keeps working locally if WiFi isn't configured
-    if (wifi_start(HOSTNAME) == ESP_OK) {
+    // AirPrint once there is a network; in the setup network (port 80 is its page, and
+    // anyone in range can join it) neither AirPrint nor the debug server runs, and the
+    // button's test page still works
+    if (wifi_start(HOSTNAME, device_busy) == ESP_OK && !wifi_setup_ap()) {
         if (airprint_esp_start(HOSTNAME, on_airprint_job) != ESP_OK)
             ESP_LOGE(TAG, "AirPrint failed to start");
         if (debug)

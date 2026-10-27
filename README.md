@@ -4,7 +4,7 @@
 > This project is actively looking for contributors to add support for more printers. Most importantly, you need to really own the printer you add: every driver must be tested on the real hardware, not only in emulation. See [Adding a printer](#adding-a-printer) to get started.
 
 
-Turns any USB-only printers into a wireless printer and scanner. An ESP32-S3 board plugs into the printer's USB port and joins your WiFi:
+Turns any USB-only printers into a wireless printer and scanner. An ESP32-S3 board plugs into the printer's USB port and joins your WiFi (set up from your phone, no password in the code):
 
 - **Print** from iPhone, iPad and Mac (AirPrint), Android (Mopria) and Linux, with no drivers or apps.
 - **Scan** from any browser, from Image Capture and Preview on a Mac, or with the button on the board.
@@ -58,17 +58,34 @@ Optionally: a SSD1315 OLED screen and a 3D-printed case, see later in this tutor
 
 ![](./docs/IMG_3538.jpeg)
 
-**Step 2: Settings.** Build once (`pio run`): this creates `.env`. Edit it:
+**Step 2: Settings (optional).** Build once (`pio run`): this creates `.env`. You can leave it as it is, or change the names and the mode:
    ```
-   WIFI_SSID=your-network
-   WIFI_PASSWORD=your-password
    PRINTER_NAME=Canon MG2500 (ESP32)
    HOSTNAME=canon-mg2500
    MODE=debug
    ```
-   `MODE=debug` lets you update the board over WiFi later (see below); `MODE=normal` does without. `.env` is git-ignored, so your WiFi password stays local.
+   `MODE=debug` lets you update the board over WiFi later (see below); `MODE=normal` does without. There is no need to put your WiFi password in `.env`: you choose the network from your phone in step 4.
 
 **Step 3: Flash.** Connect the board's **COM** port to your computer and run `pio run -t upload`. PlatformIO finds the board's serial port; if several are connected, add `--upload-port /dev/cu.usbmodem…`.
+
+**Step 4: WiFi.** On its first start the board opens its own WiFi network, **`canon-mg2500-setup`** (your `HOSTNAME` followed by `-setup`):
+
+1. On your phone or computer, join `canon-mg2500-setup`. A setup page opens by itself (if it doesn't, open http://192.168.4.1/).
+2. Pick your network, type its password and tap **Connect**. Only 2.4 GHz networks work.
+3. The board joins your network, remembers it and restarts; the setup network goes away. Join your own WiFi again: the printer is at `http://canon-mg2500.local/`.
+
+If the password was wrong, the page says so and you can try again. The OLED screen, if you have one, shows the setup network's name.
+
+To change the network later, hold the BOOT button for 10 seconds while nothing is printing or scanning: the board forgets the network and opens the setup network again. It also opens by itself when the saved network has not answered for 5 minutes (a new router, a new password); meanwhile the board keeps trying the saved network and goes back to it when it returns.
+
+<details>
+<summary>Other WiFi options</summary>
+
+- `SETUP_PASSWORD` in `.env` (at least 8 characters) protects the setup network with a password; by default it is open, like most setup networks.
+- `WIFI_SSID` and `WIFI_PASSWORD` in `.env` build a network into the firmware, for boards you flash yourself and never set up by phone. A network chosen on the setup page wins over them.
+- `CONFIG_WIFI_SETUP_AFTER_MIN` (`pio run -t menuconfig`, "Printer server") sets the 5 minutes; 0 never opens the setup network for a lost network.
+
+</details>
 
 ## Using it
 
@@ -77,7 +94,7 @@ Plug the printer to the port labelled "USB"
 NOTE: You may also need to bridge the "USB-OTG" solder join on the board, so that it supplies 5V to the printer. While the printer doesn't actively use 5V, it sense the USB plug using this signal.
 
 - **The web app:** open `http://canon-mg2500.local/` (your `HOSTNAME`) on your phone or computer.
-- **The button on the board** (BOOT, or one on GPIO4): press to scan, press twice for a test page, hold 2 s to cancel.
+- **The button on the board** (BOOT, or one on GPIO4): press to scan, press twice for a test page, hold 2 s to cancel, hold 10 s to choose another WiFi network.
 - **Print from a phone or a Mac:** on an iPhone, Share → Print and pick the printer. On a Mac, add it in System Settings → Printers & Scanners.
 - **Scan on a Mac:** open Image Capture (or Preview → File → Import from Scanner) and pick the printer.
 

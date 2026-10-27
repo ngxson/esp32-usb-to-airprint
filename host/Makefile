@@ -10,11 +10,12 @@ WEBUI = ../components/webui/webui.c ../components/webui/web_assets.c
 SCAN_CORE = ../components/scanner/pixma_scan.c ../components/scanner/jpeg_enc.c ../components/scanner/fake_scanner.c
 SCANNER = $(SCAN_CORE) ../components/scanner/shared_buf.c ../components/scanner/scan_service.c
 OLED = ../components/oled/oled_ui.c
+WIFI_SETUP = ../components/wifi_setup/wifi_setup.c
 INC = -I../components/canon_bjl/include -I../components/airprint/include -I../components/airprint \
       -I../components/scanner/include -I../components/scanner -I../components/webui/include \
-      -I../components/oled/include
+      -I../components/oled/include -I../components/wifi_setup/include
 
-all: bjl_host airprint_host scan_host oled_host
+all: bjl_host airprint_host scan_host oled_host wifisetup_host
 
 bjl_host: bjl_host.c $(BJL) $(PRINTERS) ../components/airprint/printer_driver.c ../components/canon_bjl/include/*.h \
           ../components/airprint/include/printer_driver.h
@@ -38,5 +39,8 @@ oled_host: oled_host.c $(OLED) ../components/oled/include/*.h ../components/airp
            ../components/scanner/include/*.h
 	$(CC) $(CFLAGS) $(INC) oled_host.c $(OLED) -o $@
 
+wifisetup_host: wifisetup_host.c $(WIFI_SETUP) ../components/wifi_setup/include/*.h
+	$(CC) $(CFLAGS) $(INC) wifisetup_host.c $(WIFI_SETUP) -o $@
+
 clean:
-	rm -rf bjl_host airprint_host scan_host oled_host out *.prn *.png *.raw
+	rm -rf bjl_host airprint_host scan_host oled_host wifisetup_host out *.prn *.png *.raw

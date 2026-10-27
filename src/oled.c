@@ -9,7 +9,6 @@
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
-#include "local_config.h"
 #include "oled_ui.h"
 #include "scan_service.h"
 #include "sdkconfig.h"
@@ -156,7 +155,9 @@ static void gather(oled_state_t *st)
 {
     memset(st, 0, sizeof(*st));
     st->name = s_hostname;
-    st->wifi_configured = WIFI_SSID[0] != 0;
+    st->setup_ap = wifi_setup_ap();
+    st->setup_ip = wifi_setup_ip();
+    st->wifi_configured = !st->setup_ap;
     if (wifi_connected()) {
         wifi_get_ip(st->ip, sizeof(st->ip));
         st->rssi = wifi_rssi();
@@ -210,7 +211,8 @@ static void oled_task(void *arg)
         }
 
         esp_err_t err = ESP_OK;
-        bool want_on = sleep_us == 0 || now - changed_at < sleep_us;
+        // the setup network's name stays up: it is what someone setting the board up looks for
+        bool want_on = sleep_us == 0 || now - changed_at < sleep_us || s_state.setup_ap;
         if (want_on && !on) {
             err = flush(true);
             if (err == ESP_OK)

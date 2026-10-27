@@ -20,6 +20,7 @@ make -C host -s
 host/bjl_host selftest
 host/scan_host selftest 2>/dev/null | tail -1
 host/oled_host selftest
+host/improv_host selftest
 
 echo "== status screen (all screens in $OUT/oled.png)"
 rm -f $OUT/oled-*.pbm
@@ -49,6 +50,13 @@ print('URF from the browser encoder, decoded by raster_to_png.py:',
 PY
 else
     echo "skipped: no web/node_modules (cd web && npm ci)"
+fi
+
+echo "== web installer: WiFi setup (Improv) against the installer's own client library"
+if [ -d flasher/node_modules ]; then
+    (cd flasher && node --test tests/*.test.mjs 2>&1 | grep -E "^ℹ (pass|fail)|^✖|^# (pass|fail)" | tr '\n' ' '; echo)
+else
+    echo "skipped: no flasher/node_modules (cd flasher && npm ci)"
 fi
 
 echo "== test page streams (decoded previews in $OUT/)"

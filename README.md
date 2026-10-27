@@ -58,7 +58,11 @@ Optionally: a SSD1315 OLED screen and a 3D-printed case, see later in this tutor
 
 ![](./docs/IMG_3538.jpeg)
 
-**Step 2: Settings.** Build once (`pio run`): this creates `.env`. Edit it:
+**Step 2: Install.** The easy way: open the **[web installer](https://ngxson.github.io/esp32-usb-to-airprint/)** in Chrome or Edge on a computer, click **Connect**, pick the board's serial port and install. When it is done, choose **Connect to Wi-Fi**, pick your network and type its password: the installer then links to the printer's web page. To change the network later, connect again and choose **Change Wi-Fi**. (`tools/improv.py <serial port> wifi <network>` does the same from a terminal.)
+
+That's it: skip to [Using it](#using-it). To build the firmware yourself instead (to change the settings below, or to work on it), follow steps 3 and 4.
+
+**Step 3: Settings.** Build once (`pio run`): this creates `.env`. Edit it:
    ```
    WIFI_SSID=your-network
    WIFI_PASSWORD=your-password
@@ -66,9 +70,9 @@ Optionally: a SSD1315 OLED screen and a 3D-printed case, see later in this tutor
    HOSTNAME=canon-mg2500
    MODE=debug
    ```
-   `MODE=debug` lets you update the board over WiFi later (see below); `MODE=normal` does without. `.env` is git-ignored, so your WiFi password stays local.
+   `MODE=debug` lets you update the board over WiFi later (see below); `MODE=normal` does without. `.env` is git-ignored, so your WiFi password stays local. The WiFi lines can stay empty: then set the network from the web installer as above (its **Connect** works with any build of this firmware), and a network set that way wins over `.env`'s.
 
-**Step 3: Flash.** Connect the board's **COM** port to your computer and run `pio run -t upload`. PlatformIO finds the board's serial port; if several are connected, add `--upload-port /dev/cu.usbmodem…`.
+**Step 4: Flash.** Connect the board's **COM** port to your computer and run `pio run -t upload`. PlatformIO finds the board's serial port; if several are connected, add `--upload-port /dev/cu.usbmodem…`.
 
 ## Using it
 

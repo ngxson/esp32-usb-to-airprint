@@ -25,10 +25,16 @@ host/airprint_host
 host/airprint_host.dSYM/
 host/oled_host
 host/oled_host.dSYM/
+host/improv_host
+host/improv_host.dSYM/
 host/out/
 host/*.prn
 host/*.png
 host/*.raw
+
+# web installer: its npm packages and a local build of the site (tools/gen_flasher.py)
+flasher/node_modules/
+flasher/dist/
 
 # downloaded / built Gutenprint reference
 tools/gutenprint_ref/build/

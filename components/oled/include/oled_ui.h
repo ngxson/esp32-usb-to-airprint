@@ -30,7 +30,7 @@ extern "C" {
 
 typedef struct {
     const char *name;           // host name
-    bool wifi_configured;       // false: no WiFi in .env, the printer works locally only
+    bool wifi_configured;       // false: no network set (installer or .env), the printer works locally only
     char ip[16];                // "" while not connected
     int rssi;                   // dBm, 0 = unknown
     bool started;               // the print server runs (else only print.status.connected counts)

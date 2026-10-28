@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ESP32 USB to AirPrint: web installer</title>
+<meta name="description" content="Install the ESP32 USB to AirPrint firmware on an ESP32-S3 from the browser, then set up its WiFi.">
+<!-- esp-web-tools (Apache-2.0), copied from flasher/node_modules by tools/gen_flasher.py -->
+<script type="module" src="esp-web-tools/install-button.js"></script>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #f6f7f9; --card: #fff; --text: #1d2228; --muted: #5d6670; --line: #dde1e6;
+    --accent: #0a66d8; --warn-bg: #fff6e0; --warn-line: #f0c75e;
+    --esp-tools-button-color: #0a66d8;
+    --esp-tools-button-text-color: #fff;
+    --esp-tools-button-border-radius: 8px;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #15181c; --card: #1e2227; --text: #e7eaee; --muted: #9aa3ad; --line: #30363d;
+      --accent: #5aa2ff; --warn-bg: #2e2716; --warn-line: #7a6326;
+      --esp-tools-button-color: #3d8bf2;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+         font: 16px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+  main { max-width: 720px; margin: 0 auto; padding: 32px 20px 64px; }
+  h1 { font-size: 1.7rem; line-height: 1.25; margin: 0 0 6px; }
+  .lead { color: var(--muted); margin: 0 0 24px; }
+  section { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 20px 22px; margin: 16px 0; }
+  h2 { font-size: 1.1rem; margin: 0 0 10px; }
+  ol { margin: 0; padding-left: 1.3em; }
+  li { margin: 6px 0; }
+  a { color: var(--accent); }
+  code { font: 0.9em ui-monospace, SFMono-Regular, Menlo, monospace; background: var(--bg); padding: 1px 5px; border-radius: 4px; }
+  .install { display: flex; flex-wrap: wrap; gap: 14px 24px; align-items: center; }
+  fieldset { border: 0; padding: 0; margin: 0 0 14px; }
+  label.variant { display: block; margin: 4px 0; cursor: pointer; }
+  label.variant small { display: block; margin-left: 1.6em; color: var(--muted); }
+  .version { color: var(--muted); font-size: 0.9rem; }
+  .warn { background: var(--warn-bg); border: 1px solid var(--warn-line); border-radius: 8px; padding: 10px 14px; margin: 12px 0 0; }
+  [slot=unsupported], [slot=not-allowed] { display: block; }
+  footer { color: var(--muted); font-size: 0.85rem; text-align: center; margin-top: 28px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>ESP32 USB to AirPrint</h1>
+  <p class="lead">Install the firmware on your ESP32-S3 from this page, then set up its WiFi. No software to install.
+    <a href="https://github.com/ngxson/esp32-usb-to-airprint">About the project</a></p>
+
+  <section>
+    <h2>1. Plug the board into this computer</h2>
+    <ol>
+      <li>An <b>ESP32-S3 board with 16 MB flash and 8 MB PSRAM</b> (N16R8) and two USB-C ports.</li>
+      <li>Use the port marked <b>COM</b> (or UART), <b>not</b> the one marked USB. The USB port is for the printer, and the WiFi setup below only works over the COM port.</li>
+      <li>Use Chrome or Edge on a computer. Safari, Firefox and phones cannot talk to USB devices from a web page.</li>
+    </ol>
+  </section>
+
+  <section>
+    <h2>2. Install</h2>
+    <fieldset id="variants" hidden></fieldset>
+    <div class="install">
+      <esp-web-install-button id="install" manifest="manifest-normal.json">
+        <span slot="unsupported" class="warn">This browser cannot install the firmware: open this page in Chrome or Edge on a computer.</span>
+        <span slot="not-allowed" class="warn">The installer needs a secure page: open it over https (or from localhost).</span>
+      </esp-web-install-button>
+      <span class="version" id="version"></span>
+    </div>
+    <ol style="margin-top: 14px">
+      <li>Click <b>Connect</b> and pick the board's serial port (often "USB Single Serial", "CP210x" or "CH340").</li>
+      <li>On a board that never ran this firmware, let it erase the board first.</li>
+      <li>If it cannot connect: hold the board's <b>BOOT</b> button, press <b>RST</b>, release BOOT, then try again.</li>
+    </ol>
+    <p class="warn">No serial port in the list? The board's USB-to-serial chip may need a driver:
+      <a href="https://www.wch-ic.com/downloads/CH343SER_EXE.html">CH340/CH343</a> or
+      <a href="https://www.silabs.com/developer-tools/usb-to-uart-bridge-vcp-drivers">CP210x</a>.
+      On Linux, add yourself to the <code>dialout</code> group.</p>
+  </section>
+
+  <section>
+    <h2>3. Connect it to your WiFi</h2>
+    <ol>
+      <li>After installing, the installer offers <b>Connect to Wi-Fi</b>: pick your network (2.4 GHz) and type its password.</li>
+      <li>Then <b>Visit Device</b> opens the printer's web page. It is also at <code>http://canon-mg2500.local/</code>.</li>
+      <li>To change the network later, plug the COM port in again, click <b>Connect</b> and choose <b>Change Wi-Fi</b>.</li>
+    </ol>
+  </section>
+
+  <section>
+    <h2>4. Plug in the printer</h2>
+    <ol>
+      <li>Connect the printer to the board's port marked <b>USB</b> and power the board (the COM port can stay on a phone charger).</li>
+      <li>Bridge the board's <b>USB-OTG</b> solder pads so that it gives the printer 5 V: most printers only appear when they see it.</li>
+      <li>Print from an iPhone, iPad or Mac (AirPrint), Android (Mopria), or from the board's web page; scan from the web page or Image Capture.</li>
+    </ol>
+  </section>
+
+  <footer>Firmware: MIT. The installer is <a href="https://github.com/esphome/esp-web-tools">ESP Web Tools</a> (Apache-2.0); the WiFi setup uses <a href="https://www.improv-wifi.com/">Improv Wi-Fi</a>.</footer>
+</main>
+<script>
+  // the firmware variants this site was built with (tools/gen_flasher.py writes variants.json)
+  const DESCRIPTIONS = {
+    normal: 'Printing and scanning.',
+    debug: 'Also lets you update the firmware and read its log over WiFi (tools/remote.py). Anyone on your network can do the same: only on a network you trust.',
+  };
+  const button = document.getElementById('install');
+  const version = document.getElementById('version');
+  function choose(v) {
+    button.manifest = v.manifest;
+    button.setAttribute('manifest', v.manifest);
+    version.textContent = 'Version ' + v.version;
+  }
+  fetch('variants.json').then((r) => r.json()).then((variants) => {
+    if (!variants.length) return;
+    const box = document.getElementById('variants');
+    if (variants.length > 1) {
+      box.hidden = false;
+      for (const [i, v] of variants.entries()) {
+        const label = document.createElement('label');
+        label.className = 'variant';
+        const input = Object.assign(document.createElement('input'), { type: 'radio', name: 'variant', checked: i === 0 });
+        input.addEventListener('change', () => choose(v));
+        const small = document.createElement('small');
+        small.textContent = DESCRIPTIONS[v.id] || '';
+        label.append(input, ' ', v.label, small);
+        box.append(label);
+      }
+    }
+    choose(variants[0]);
+  }).catch(() => {});
+</script>
+</body>
+</html>

@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { t, i18n } from '../lib/i18n.svelte';
   import type { Snippet } from 'svelte';
   import X from '@lucide/svelte/icons/x';
 
@@ -18,10 +19,10 @@
 <svelte:window onkeydown={key} />
 
 <div class="backdrop" role="presentation" onclick={(e) => e.target === e.currentTarget && onclose()}>
-  <div class="modal" class:wide role="dialog" aria-modal="true" aria-label={title}>
+  <div lang={i18n.locale} class="modal" class:wide role="dialog" aria-modal="true" aria-label={title}>
     <header>
       <h2 class="grow ellipsis">{title}</h2>
-      <button class="icon-btn" aria-label="Close" onclick={onclose}><X size={20} /></button>
+      <button class="icon-btn" aria-label={t('Close')} onclick={onclose}><X size={20} /></button>
     </header>
     <div class="body">
       {@render children()}

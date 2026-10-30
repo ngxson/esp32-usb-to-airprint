@@ -1,22 +1,24 @@
 <script lang="ts">
+  import { t, i18n } from '../lib/i18n.svelte';
   import X from '@lucide/svelte/icons/x';
   import { dismiss, ui } from '../lib/ui.svelte';
 </script>
 
-<div class="toasts" aria-live="polite">
-  {#each ui.toasts as t (t.id)}
-    <div class="toast {t.kind}">
-      <span class="grow">{t.text}</span>
-      {#each t.actions as a}
+<div lang={i18n.locale} class="toasts" aria-live="polite">
+  {#each ui.toasts as entry (entry.id)}
+    <div class="toast {entry.kind}">
+      <span class="grow" lang={entry.locale}>{entry.text}</span>
+      {#each entry.actions as a}
         <button
           class="btn ghost act"
+          lang={entry.locale}
           onclick={() => {
-            dismiss(t.id);
+            dismiss(entry.id);
             a.run();
           }}>{a.label}</button
         >
       {/each}
-      <button class="icon-btn" aria-label="Dismiss" onclick={() => dismiss(t.id)}><X size={16} /></button>
+      <button class="icon-btn" aria-label={t('Dismiss')} onclick={() => dismiss(entry.id)}><X size={16} /></button>
     </div>
   {/each}
 </div>

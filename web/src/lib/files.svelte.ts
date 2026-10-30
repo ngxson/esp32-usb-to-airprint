@@ -1,6 +1,7 @@
 // The Files tab's store: images and PDFs kept in IndexedDB (this browser
 // only), with thumbnails.
 
+import { i18n } from './i18n.svelte';
 import * as db from './db';
 import type { StoredFile } from './db';
 import { imageDpi } from './imageinfo';
@@ -12,7 +13,7 @@ export type { StoredFile };
 class Files {
   list = $state.raw<StoredFile[]>([]);
   loaded = $state(false);
-  error = $state('');
+  error = $state.raw<Error | null>(null);
 }
 export const files = new Files();
 
@@ -30,8 +31,9 @@ export async function loadFiles() {
     const all = await db.allFiles();
     all.sort((a, b) => b.created - a.created);
     files.list = all;
+    files.error = null;
   } catch (e) {
-    files.error = `Cannot open the file store: ${(e as Error).message}`;
+    files.error = e instanceof Error ? e : new Error(String(e));
   }
   files.loaded = true;
 }
@@ -138,9 +140,12 @@ export function download(blob: Blob, name: string) {
 }
 
 export function formatSize(n: number): string {
-  if (n < 1024) return `${n} B`;
-  if (n < 1048576) return `${Math.round(n / 1024)} KB`;
-  return `${(n / 1048576).toFixed(1)} MB`;
+  const format = (value: number, digits = 0) => value.toLocaleString(i18n.locale, {
+    minimumFractionDigits: digits, maximumFractionDigits: digits, useGrouping: false,
+  });
+  if (n < 1024) return `${format(n)} B`;
+  if (n < 1048576) return `${format(n / 1024)} KB`;
+  return `${format(n / 1048576, 1)} MB`;
 }
 
 export function stamp(d = new Date()): string {

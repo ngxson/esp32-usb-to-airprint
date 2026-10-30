@@ -1,10 +1,12 @@
 <script lang="ts">
+  import { t } from '../lib/i18n.svelte';
+  import LanguagePicker from './LanguagePicker.svelte';
   import Printer from '@lucide/svelte/icons/printer';
   import ScanLine from '@lucide/svelte/icons/scan-line';
   import FolderOpen from '@lucide/svelte/icons/folder-open';
   import Layers from '@lucide/svelte/icons/layers';
   import ChevronRight from '@lucide/svelte/icons/chevron-right';
-  import { device } from '../lib/device.svelte';
+  import { device, deviceLabel } from '../lib/device.svelte';
   import { files } from '../lib/files.svelte';
   import { work } from '../lib/process.svelte';
   import { scanProgress } from '../lib/scan.svelte';
@@ -13,41 +15,41 @@
 
   const printerLine = $derived.by(() => {
     const p = device.printer;
-    if (!device.loaded) return 'Connecting…';
-    if (!p) return 'Unavailable';
-    if (!p.connected) return 'Printer not connected';
+    if (!device.loaded) return t('Connecting…');
+    if (!p) return t('Unavailable');
+    if (!p.connected) return t('Printer not connected');
     const job = p.jobs.find((j) => j.id === p.active);
-    if (job && job.state === 'processing') return `Printing · page ${job.pages + 1}`;
-    if (device.scan?.state === 'scanning') return 'Busy scanning';
+    if (job && job.state === 'processing') return t('Printing · page {page}', { page: job.pages + 1 });
+    if (device.scan?.state === 'scanning') return t('Busy scanning');
     const low = p.supplies.find((s) => s.level >= 0 && s.level <= 10);
-    if (p.reasons.some((r) => r.endsWith('-error'))) return p.message;
-    return low ? `Ready · ${low.name} ink low` : 'Ready';
+    if (p.reasons.some((r) => r.endsWith('-error'))) return deviceLabel(p.message);
+    return low ? t('Ready · {ink} ink low', { ink: deviceLabel(low.name) }) : t('Ready');
   });
 
   const scanLine = $derived.by(() => {
     const s = device.scan;
-    if (!device.loaded) return 'Connecting…';
-    if (!s || !s.scanner) return 'No scanner';
-    if (s.state === 'scanning') return s.lines ? `Scanning · ${Math.round(scanProgress(s) * 100)}%` : 'Warming up…';
-    return 'Ready';
+    if (!device.loaded) return t('Connecting…');
+    if (!s || !s.scanner) return t('No scanner');
+    if (s.state === 'scanning') return s.lines ? t('Scanning · {percent}%', { percent: Math.round(scanProgress(s) * 100) }) : t('Warming up…');
+    return t('Ready');
   });
 
   const items = $derived([
-    { id: 'printer', label: 'Printer', icon: Printer, line: printerLine, desc: 'Status, ink and print jobs' },
-    { id: 'scanner', label: 'Scanner', icon: ScanLine, line: scanLine, desc: 'Scan documents and photos' },
+    { id: 'printer', label: t('Printer'), icon: Printer, line: printerLine, desc: t('Status, ink and print jobs') },
+    { id: 'scanner', label: t('Scanner'), icon: ScanLine, line: scanLine, desc: t('Scan documents and photos') },
     {
       id: 'files',
-      label: 'Files',
+      label: t('Files'),
       icon: FolderOpen,
-      line: files.loaded ? `${files.list.length} file${files.list.length === 1 ? '' : 's'}` : '…',
-      desc: 'Scans and uploads: print or download',
+      line: files.loaded ? t(files.list.length === 1 ? '{count} file' : '{count} files', { count: files.list.length }) : '…',
+      desc: t('Scans and uploads: print or download'),
     },
     {
       id: 'process',
-      label: 'Process',
+      label: t('Process'),
       icon: Layers,
-      line: work.items.length ? `${work.items.length} page${work.items.length === 1 ? '' : 's'}` : 'Empty',
-      desc: 'Rotate, crop, ID card copies, PDF',
+      line: work.items.length ? t(work.items.length === 1 ? '{count} page' : '{count} pages', { count: work.items.length }) : t('Empty'),
+      desc: t('Rotate, crop, ID card copies, PDF'),
     },
   ]);
 
@@ -64,13 +66,13 @@
   <div class="brand">
     <div class="logo"><Printer size={22} /></div>
     <div class="grow">
-      <div class="name ellipsis">{device.printer?.name || 'Printer'}</div>
+      <div class="name ellipsis">{device.printer?.name || t('Printer')}</div>
       <div class="model ellipsis">{device.printer?.model || ''}</div>
     </div>
   </div>
 
   {#if home}
-    <p class="hello">What would you like to do?</p>
+    <p class="hello">{t('What would you like to do?')}</p>
   {/if}
 
   <ul>
@@ -93,8 +95,9 @@
   <div class="foot">
     <span class="pill {tone}">
       <span class="dot"></span>
-      {device.online ? (tone === 'busy' ? 'Working' : tone === 'warn' ? 'No printer' : 'Online') : 'Reconnecting…'}
+      {device.online ? (tone === 'busy' ? t('Working') : tone === 'warn' ? t('No printer') : t('Online')) : t('Reconnecting…')}
     </span>
+    <LanguagePicker />
   </div>
 </nav>
 

@@ -1,6 +1,7 @@
 // The Process tab: a list of pages put together from Files (rotated,
 // cropped) and ID card copies, exported as one PDF.
 
+import { t } from './i18n.svelte';
 import * as db from './db';
 import { CARD_MM, MM, PAPERS, type PaperId, type Rotation } from './layout';
 import { buildPdf, type PdfImage, type PdfPage } from './pdfwriter';
@@ -203,8 +204,8 @@ export async function exportPdf(
     pages.push({ w: sheet.w, h: sheet.h, images });
     progress(++done, items.length);
   }
-  if (!pages.length) throw new Error('nothing to export');
-  const name = `Document ${stamp()}.pdf`;
+  if (!pages.length) throw new Error(t('nothing to export'));
+  const name = t('Document {stamp}.pdf', { stamp: stamp() });
   const blob = buildPdf(pages, name.replace(/\.pdf$/, ''));
   return addFile({ name, blob, source: 'process' });
 }

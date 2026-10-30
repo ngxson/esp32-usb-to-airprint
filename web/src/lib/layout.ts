@@ -1,6 +1,8 @@
 // Paper sizes and where content goes on the sheet. Units: PostScript points
 // (1/72 in), origin top left, y down.
 
+import { t } from './i18n.ts';
+
 export type PaperId = 'a4' | 'letter';
 export type Fit = 'fit' | 'fill' | 'actual';
 export type Orientation = 'auto' | 'portrait' | 'landscape';
@@ -8,7 +10,7 @@ export type Rotation = 0 | 90 | 180 | 270; // clockwise
 
 export const PAPERS: Record<PaperId, { name: string; w: number; h: number; wIn: number; hIn: number }> = {
   a4: { name: 'A4', w: (210 / 25.4) * 72, h: (297 / 25.4) * 72, wIn: 210 / 25.4, hIn: 297 / 25.4 },
-  letter: { name: 'Letter', w: 612, h: 792, wIn: 8.5, hIn: 11 },
+  letter: { get name() { return t('Letter'); }, w: 612, h: 792, wIn: 8.5, hIn: 11 },
 };
 
 // what the MG2500 cannot print (canon_bjl: 10/10/9/15 pt)

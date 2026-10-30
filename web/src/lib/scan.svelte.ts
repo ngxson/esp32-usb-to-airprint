@@ -3,6 +3,7 @@
 // shows them growing and saves the finished JPEG to Files. 600 dpi pages may
 // not fit the device's memory, so they are streamed to the browser that asked.
 
+import { t } from './i18n.svelte';
 import * as db from './db';
 import { device, onState, type ScanState } from './device.svelte';
 import { addFile, stamp, storedFile, type StoredFile } from './files.svelte';
@@ -16,7 +17,7 @@ class ScanUi {
   received = $state(0);
   streaming = $state(false); // a 600 dpi stream to this page
   streamLines = $state(0);
-  error = $state('');
+  error = $state.raw<{ cause: Error; lost: boolean } | null>(null);
   lastFile = $state.raw<StoredFile | null>(null); // the newest scan saved here
 }
 export const scanUi = new ScanUi();
@@ -57,7 +58,7 @@ function setPreview(parts: BlobPart[], id: string) {
 }
 
 function scanName() {
-  return `Scan ${stamp()}.jpg`;
+  return t('Scan {stamp}.jpg', { stamp: stamp() });
 }
 
 // Saves a kept scan once per browser; fresh: this tab stored it.
@@ -82,7 +83,7 @@ async function save(id: string, blob: Blob): Promise<{ file: StoredFile | null; 
 async function follow(id: string) {
   if (following === id) return;
   following = id;
-  scanUi.error = '';
+  scanUi.error = null;
   const parts: BlobPart[] = [];
   let from = 0;
   let state = 'scanning';
@@ -112,13 +113,13 @@ async function follow(id: string) {
     }
     if (state === 'done' && from) {
       const { file, fresh } = await save(id, new Blob(parts, { type: 'image/jpeg' }));
-      if (fresh) toast('Scan saved to Files', 'ok');
+      if (fresh) toast(t('Scan saved to Files'), 'ok');
       settle(id, file);
     } else {
       settle(id, null);
     }
   } catch (e) {
-    scanUi.error = `Lost the scan: ${(e as Error).message}`;
+    scanUi.error = { cause: e instanceof Error ? e : new Error(String(e)), lost: true };
     settle(id, null);
   } finally {
     if (following === id) following = '';
@@ -142,7 +143,7 @@ export function initScanSync() {
 }
 
 export async function startKept(paper: ScanPaper, dpi: number): Promise<string> {
-  scanUi.error = '';
+  scanUi.error = null;
   const r = await fetch(`/scan/last?paper=${paper}&dpi=${dpi}`, { method: 'POST' });
   if (!r.ok) throw new Error((await r.text()) || `HTTP ${r.status}`);
   const js = await r.json();
@@ -153,7 +154,7 @@ let streamAbort: AbortController | null = null;
 
 // 600 dpi: the JPEG comes straight to this page
 export async function startStream(paper: ScanPaper, dpi: number): Promise<StoredFile | null> {
-  scanUi.error = '';
+  scanUi.error = null;
   streamAbort = new AbortController();
   scanUi.streaming = true;
   const parts: BlobPart[] = [];
@@ -163,15 +164,15 @@ export async function startStream(paper: ScanPaper, dpi: number): Promise<Stored
     if (!r.ok) throw new Error((await r.text()) || `HTTP ${r.status}`);
     const id = `stream-${Date.now().toString(36)}`;
     const rd = r.body!.getReader();
-    let t = 0;
+    let lastPreview = 0;
     for (;;) {
       const { done, value } = await rd.read();
       if (done) break;
       parts.push(value);
       got += value.length;
       scanUi.received = got;
-      if (Date.now() - t > 1500) {
-        t = Date.now();
+      if (Date.now() - lastPreview > 1500) {
+        lastPreview = Date.now();
         setPreview(parts, id);
       }
     }
@@ -179,10 +180,12 @@ export async function startStream(paper: ScanPaper, dpi: number): Promise<Stored
     if (device.scan?.state === 'canceled') return null;
     const f = await addFile({ name: scanName(), blob: new Blob(parts, { type: 'image/jpeg' }), source: 'scan' });
     scanUi.lastFile = f;
-    toast('Scan saved to Files', 'ok');
+    toast(t('Scan saved to Files'), 'ok');
     return f;
   } catch (e) {
-    if ((e as Error).name !== 'AbortError') scanUi.error = (e as Error).message;
+    if ((e as Error).name !== 'AbortError') {
+      scanUi.error = { cause: e instanceof Error ? e : new Error(String(e)), lost: false };
+    }
     return null;
   } finally {
     scanUi.streaming = false;
@@ -199,5 +202,5 @@ export function scanProgress(st: ScanState | null): number {
 }
 
 export function sourceLabel(s: string): string {
-  return s === 'button' ? 'the button on the printer' : s === 'escl' ? 'a computer (AirScan)' : 'the web page';
+  return s === 'button' ? t('the button on the printer') : s === 'escl' ? t('a computer (AirScan)') : t('the web page');
 }

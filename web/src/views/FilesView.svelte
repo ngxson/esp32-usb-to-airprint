@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { t, i18n } from '../lib/i18n.svelte';
   import Upload from '@lucide/svelte/icons/upload';
   import Printer from '@lucide/svelte/icons/printer';
   import Download from '@lucide/svelte/icons/download';
@@ -50,22 +51,23 @@
 
   // grouped by day, newest first, as Google Photos does
   const groups = $derived.by(() => {
+    const locale = i18n.locale;
     const out: { key: string; label: string; files: StoredFile[] }[] = [];
     for (const f of shown) {
       const d = new Date(f.created);
       const key = d.toDateString();
-      if (out.at(-1)?.key !== key) out.push({ key, label: dayLabel(d), files: [] });
+      if (out.at(-1)?.key !== key) out.push({ key, label: dayLabel(d, locale), files: [] });
       out.at(-1)!.files.push(f);
     }
     return out;
   });
 
-  function dayLabel(d: Date): string {
+  function dayLabel(d: Date, locale: string): string {
     const today = new Date();
     const yesterday = new Date(today.getFullYear(), today.getMonth(), today.getDate() - 1);
-    if (d.toDateString() === today.toDateString()) return 'Today';
-    if (d.toDateString() === yesterday.toDateString()) return 'Yesterday';
-    return d.toLocaleDateString(undefined, {
+    if (d.toDateString() === today.toDateString()) return t('Today');
+    if (d.toDateString() === yesterday.toDateString()) return t('Yesterday');
+    return d.toLocaleDateString(locale, {
       weekday: 'short',
       day: 'numeric',
       month: 'short',
@@ -98,12 +100,12 @@
     try {
       const f = await exportPdf(pageItems(chosen), { paper: 'original', dpi: 200, fallback: 'a4' }, (d, t) => (progress = d / t));
       stopSelecting();
-      toast(`Saved ${f.name} to Files`, 'ok', [
-        { label: 'Print', run: () => openPrint(f) },
-        { label: 'Download', run: () => download(f.blob, f.name) },
+      toast(t('Saved {name} to Files', { name: f.name }), 'ok', [
+        { label: t('Print'), run: () => openPrint(f) },
+        { label: t('Download'), run: () => download(f.blob, f.name) },
       ]);
     } catch (e) {
-      toast(`Could not make the PDF: ${(e as Error).message}`, 'error');
+      toast(t('Could not make the PDF: {error}', { error: (e as Error).message }), 'error');
     } finally {
       busy = false;
     }
@@ -111,11 +113,11 @@
 
   async function bulkDelete() {
     const n = chosen.length;
-    if (!confirm(`Delete ${n} file${n === 1 ? '' : 's'} from this browser?`)) return;
+    if (!confirm(n === 1 ? t('Delete {count} file from this browser?', { count: n }) : t('Delete {count} files from this browser?', { count: n }))) return;
     busy = true;
     try {
       for (const f of chosen) await removeFile(f.id);
-      toast(`Deleted ${n} file${n === 1 ? '' : 's'}`);
+      toast(n === 1 ? t('Deleted {count} file', { count: n }) : t('Deleted {count} files', { count: n }));
       stopSelecting();
     } finally {
       busy = false;
@@ -127,14 +129,14 @@
     const arr = Array.from(list);
     for (const file of arr) {
       if (!isSupported(file.type, file.name)) {
-        toast(`${file.name}: only PDFs and images`, 'error');
+        toast(t('{name}: only PDFs and images', { name: file.name }), 'error');
         continue;
       }
       uploading++;
       try {
         await addFile({ name: file.name, blob: file, source: 'upload' });
       } catch (e) {
-        toast(`${file.name}: ${(e as Error).message}`, 'error');
+        toast(t('{name}: {error}', { name: file.name, error: (e as Error).message }), 'error');
       } finally {
         uploading--;
       }
@@ -154,28 +156,28 @@
   }
 
   async function del(f: StoredFile) {
-    if (!confirm(`Delete "${f.name}" from this browser?`)) return;
+    if (!confirm(t('Delete "{name}" from this browser?', { name: f.name }))) return;
     await removeFile(f.id);
   }
 
   async function rename(f: StoredFile) {
-    const name = prompt('New name', f.name);
+    const name = prompt(t('New name'), f.name);
     if (name) await renameFile(f.id, name);
   }
 
   async function toWork(f: StoredFile) {
     const n = await addFilesToWork([f]);
-    toast(`${n} page${n === 1 ? '' : 's'} added to Process`, 'ok', [{ label: 'Open', run: () => go('process') }]);
+    toast(n === 1 ? t('{count} page added to Process', { count: n }) : t('{count} pages added to Process', { count: n }), 'ok', [{ label: t('Open'), run: () => go('process') }]);
   }
 
   // the day is in the group's heading
   function when(t: number): string {
-    return new Date(t).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    return new Date(t).toLocaleTimeString(i18n.locale, { hour: '2-digit', minute: '2-digit' });
   }
 
   function kind(f: StoredFile): string {
-    if (f.type === 'application/pdf') return `PDF · ${f.pages} page${f.pages === 1 ? '' : 's'}`;
-    return f.dpi ? `${f.source === 'scan' ? 'Scan' : 'Image'} · ${f.dpi} dpi` : 'Image';
+    if (f.type === 'application/pdf') return f.pages === 1 ? t('PDF · {count} page', { count: f.pages ?? 0 }) : t('PDF · {count} pages', { count: f.pages ?? 0 });
+    return f.dpi ? (f.source === 'scan' ? t('Scan · {dpi} dpi', { dpi: f.dpi }) : t('Image · {dpi} dpi', { dpi: f.dpi })) : t('Image');
   }
 </script>
 
@@ -185,7 +187,7 @@
   class="drop"
   class:dragging
   role="region"
-  aria-label="Files"
+  aria-label={t('Files')}
   ondragover={(e) => {
     e.preventDefault();
     dragging = true;
@@ -195,36 +197,36 @@
 >
   <div class="head row wrap">
     <div class="grow">
-      <h1>Files</h1>
-      <p class="muted small">Kept in this browser only · {files.list.length} files · {formatSize(total)}</p>
+      <h1>{t('Files')}</h1>
+      <p class="muted small">{files.list.length === 1 ? t('Kept in this browser only · {count} file · {size}', { count: files.list.length, size: formatSize(total) }) : t('Kept in this browser only · {count} files · {size}', { count: files.list.length, size: formatSize(total) })}</p>
     </div>
     {#if files.list.length}
       <button class="btn" class:on={selecting} onclick={() => (selecting ? stopSelecting() : (selecting = true))}>
-        {#if selecting}<X size={17} /> Done{:else}<SquareCheck size={17} /> Select{/if}
+        {#if selecting}<X size={17} /> {t('Done')}{:else}<SquareCheck size={17} /> {t('Select')}{/if}
       </button>
     {/if}
     <button class="btn primary" onclick={() => input.click()}>
-      {#if uploading}<LoaderCircle size={17} class="spin" />{:else}<Upload size={17} />{/if} Upload
+      {#if uploading}<LoaderCircle size={17} class="spin" />{:else}<Upload size={17} />{/if} {t('Upload')}
     </button>
     <input bind:this={input} type="file" accept="application/pdf,image/*" multiple hidden onchange={onPick} />
   </div>
 
   <div class="seg filters">
-    {#each [['all', 'All'], ['scan', 'Scans'], ['upload', 'Uploads'], ['process', 'Made here']] as [k, label]}
+    {#each [['all', t('All')], ['scan', t('Scans')], ['upload', t('Uploads')], ['process', t('Made here')]] as [k, label]}
       <button class:on={filter === k} onclick={() => (filter = k as typeof filter)}>{label}</button>
     {/each}
   </div>
 
   {#if files.error}
-    <p class="err">{files.error}</p>
+    <p class="err">{t('Cannot open the file store: {message}', { message: files.error.message })}</p>
   {:else if files.loaded && !shown.length}
     <div class="card empty">
       <Inbox size={40} strokeWidth={1.4} />
       <div>
-        <b>No files yet</b>
-        <p class="small">Upload PDFs or pictures (or drop them here), or scan a page: it shows up here.</p>
+        <b>{t('No files yet')}</b>
+        <p class="small">{t('Upload PDFs or pictures (or drop them here), or scan a page: it shows up here.')}</p>
       </div>
-      <button class="btn" onclick={() => input.click()}><Upload size={17} /> Upload</button>
+      <button class="btn" onclick={() => input.click()}><Upload size={17} /> {t('Upload')}</button>
     </div>
   {:else}
     {#each groups as g (g.key)}
@@ -236,8 +238,8 @@
         class:on={selecting && all}
         class:show={selecting}
         onclick={() => toggleDay(g.files)}
-        aria-label="{all && selecting ? 'Unselect' : 'Select'} all of {g.label}"
-        title="Select the whole day"><Check size={14} /></button
+        aria-label={all && selecting ? t('Unselect all of {day}', { day: g.label }) : t('Select all of {day}', { day: g.label })}
+        title={t('Select the whole day')}><Check size={14} /></button
       >
       <h2>{g.label} <span class="muted small">{g.files.length}</span></h2>
     </div>
@@ -248,11 +250,11 @@
           <button
             class="thumb"
             onclick={() => (selecting ? toggle(f) : openViewer(f))}
-            aria-label={selecting ? `${n ? 'Unselect' : 'Select'} ${f.name}` : `Open ${f.name}`}
+            aria-label={selecting ? (n ? t('Unselect {name}', { name: f.name }) : t('Select {name}', { name: f.name })) : t('Open {name}', { name: f.name })}
             aria-pressed={selecting ? n > 0 : undefined}
           >
             {#if f.thumb}<img src={thumbUrl(f)} alt="" loading="lazy" />{/if}
-            {#if f.type === 'application/pdf'}<span class="badge">PDF</span>{/if}
+            {#if f.type === 'application/pdf'}<span class="badge">{t('PDF')}</span>{/if}
             {#if selecting}<span class="pick">{n || ''}</span>{/if}
           </button>
           <div class="meta">
@@ -264,7 +266,7 @@
               <div class="more">
                 <button
                   class="icon-btn"
-                  aria-label="More actions"
+                  aria-label={t('More actions')}
                   onclick={(e) => {
                     e.stopPropagation();
                     menu = menu === f.id ? '' : f.id;
@@ -272,17 +274,17 @@
                 >
                 {#if menu === f.id}
                   <div class="menu card" role="menu">
-                    <button onclick={() => toWork(f)}><Layers size={16} /> Add to Process</button>
-                    <button onclick={() => rename(f)}><Pencil size={16} /> Rename</button>
-                    <button class="danger" onclick={() => del(f)}><Trash2 size={16} /> Delete</button>
+                    <button onclick={() => toWork(f)}><Layers size={16} /> {t('Add to Process')}</button>
+                    <button onclick={() => rename(f)}><Pencil size={16} /> {t('Rename')}</button>
+                    <button class="danger" onclick={() => del(f)}><Trash2 size={16} /> {t('Delete')}</button>
                   </div>
                 {/if}
               </div>
             </div>
             {#if !selecting}
             <div class="row btns">
-              <button class="btn primary grow" onclick={() => openPrint(f)}><Printer size={16} /> Print</button>
-              <button class="btn" onclick={() => download(f.blob, f.name)} aria-label="Download"><Download size={16} /></button>
+              <button class="btn primary grow" onclick={() => openPrint(f)}><Printer size={16} /> {t('Print')}</button>
+              <button class="btn" onclick={() => download(f.blob, f.name)} aria-label={t('Download')}><Download size={16} /></button>
             </div>
             {/if}
           </div>
@@ -293,23 +295,23 @@
     {/each}
   {/if}
   {#if dragging}
-    <div class="overlay"><Upload size={36} /> Drop to add</div>
+    <div class="overlay"><Upload size={36} /> {t('Drop to add')}</div>
   {/if}
   {#if selecting}
     <div class="bulk card">
       <div class="grow">
-        <b>{chosen.length} selected</b>
+        <b>{t('{count} selected', { count: chosen.length })}</b>
         <div class="muted small">
-          {chosen.length ? 'The PDF keeps the order you picked them in.' : 'Tap files to pick them.'}
+          {chosen.length ? t('The PDF keeps the order you picked them in.') : t('Tap files to pick them.')}
         </div>
         {#if busy && progress}<div class="bar"><div style:width={`${progress * 100}%`}></div></div>{/if}
       </div>
       <button class="btn ghost" onclick={selectAll} disabled={busy}>
-        {selected.length && shown.every((f) => selected.includes(f.id)) ? 'None' : 'All'}
+        {selected.length && shown.every((f) => selected.includes(f.id)) ? t('None') : t('All')}
       </button>
-      <button class="btn danger" onclick={bulkDelete} disabled={!chosen.length || busy}><Trash2 size={17} /> Delete</button>
+      <button class="btn danger" onclick={bulkDelete} disabled={!chosen.length || busy}><Trash2 size={17} /> {t('Delete')}</button>
       <button class="btn primary" onclick={bulkPdf} disabled={!chosen.length || busy}>
-        {#if busy}<LoaderCircle size={17} class="spin" />{:else}<FileDown size={17} />{/if} Save as PDF
+        {#if busy}<LoaderCircle size={17} class="spin" />{:else}<FileDown size={17} />{/if} {t('Save as PDF')}
       </button>
     </div>
   {/if}

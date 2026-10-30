@@ -113,6 +113,8 @@ On the computer, without the board: `make -C host && cd host && ./airprint_host`
 
 Technical details are in [AGENTS.md](AGENTS.md).
 
+The web UI supports English and Simplified Chinese. Choose a language in the navigation menu; the choice is saved in this browser. See [web/I18N.md](web/I18N.md) for translation maintenance.
+
 ## Adding a printer
 
 Each printer model is a driver in `components/printers/`, listed in `printers.c`; the firmware picks the one of the printer that is plugged in. A Canon PIXMA whose stream is close to the MG2500's is one line in `canon_pixma.c`; another printer is a new file in the same folder. See [AGENTS.md](AGENTS.md) for details.

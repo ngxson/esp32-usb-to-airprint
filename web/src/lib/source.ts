@@ -2,6 +2,7 @@
 // Content units are points; an image of unknown resolution gets a nominal
 // one that makes it A4-sized (`known: false`).
 
+import { t } from './i18n.ts';
 import type { PDFDocumentProxy } from 'pdfjs-dist/legacy/build/pdf.mjs';
 import { contentMatrix, PAPERS, type Rotation } from './layout';
 
@@ -52,7 +53,7 @@ async function openPdf(blob: Blob): Promise<Source> {
     doc = await task.promise;
   } catch (e) {
     const name = (e as { name?: string }).name;
-    throw new Error(name === 'PasswordException' ? 'the PDF is password protected' : 'not a readable PDF');
+    throw new Error(name === 'PasswordException' ? t('the PDF is password protected') : t('not a readable PDF'));
   }
   const pages: PageSize[] = [];
   for (let i = 1; i <= doc.numPages; i++) {
@@ -86,7 +87,7 @@ async function openImage(blob: Blob, dpi: number | null): Promise<Source> {
   try {
     bmp = await createImageBitmap(blob, { imageOrientation: 'from-image' });
   } catch {
-    throw new Error('this browser cannot read that image');
+    throw new Error(t('this browser cannot read that image'));
   }
   const nominal = Math.max(bmp.width, bmp.height) / PAPERS.a4.hIn; // fills A4
   const ptPerPx = 72 / (dpi || nominal);
@@ -171,6 +172,6 @@ export async function renderThumb(src: Source, page: number, max: number, rot: R
 
 export function canvasBlob(c: HTMLCanvasElement, type = 'image/jpeg', quality = 0.85): Promise<Blob> {
   return new Promise((resolve, reject) =>
-    c.toBlob((b) => (b ? resolve(b) : reject(new Error('cannot encode the image'))), type, quality),
+    c.toBlob((b) => (b ? resolve(b) : reject(new Error(t('cannot encode the image')))), type, quality),
   );
 }

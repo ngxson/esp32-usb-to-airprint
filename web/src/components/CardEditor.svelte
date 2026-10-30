@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { t, i18n } from '../lib/i18n.svelte';
   import ScanLine from '@lucide/svelte/icons/scan-line';
   import FolderOpen from '@lucide/svelte/icons/folder-open';
   import Crop from '@lucide/svelte/icons/crop';
@@ -51,7 +52,7 @@
   }
 
   async function fromFiles(side: 'front' | 'back') {
-    const [f] = await pickFiles(`Choose the ${side} of the card`, false);
+    const [f] = await pickFiles(side === 'front' ? t('Choose the front of the card') : t('Choose the back of the card'), false);
     if (f) set(side, await autoRef(f));
   }
 
@@ -60,10 +61,10 @@
     try {
       const sid = await startKept('card', 300);
       const f = await whenSaved(sid);
-      if (!f) throw new Error(device.scan?.error || 'the scan did not finish');
+      if (!f) throw new Error(device.scan?.error || t('the scan did not finish'));
       set(side, await autoRef(f));
     } catch (e) {
-      toast(`Scan failed: ${(e as Error).message}`, 'error');
+      toast(t('Scan failed: {error}', { error: (e as Error).message }), 'error');
     } finally {
       scanning = '';
     }
@@ -75,30 +76,29 @@
 </script>
 
 {#if card}
-  <Modal title="ID card copy" {onclose} wide>
-    <div class="layout">
+  <Modal title={t('ID card copy')} {onclose} wide>
+    <div class="layout" lang={i18n.locale}>
       <div class="sides">
         <p class="muted small">
-          Both sides of a card on one sheet, at the card's real size. Put the card in the corner of the glass by the
-          arrow and scan the front, then turn it over and scan the back. Or use pictures from Files.
+          {t('Both sides of a card on one sheet, at the card\'s real size. Put the card in the corner of the glass by the arrow and scan the front, then turn it over and scan the back. Or use pictures from Files.')}
         </p>
         {#each ['front', 'back'] as const as side}
           {@const ref = card[side]}
           <div class="side card">
             <div class="row">
-              <h3 class="grow">{side === 'front' ? 'Front' : 'Back'}</h3>
+              <h3 class="grow">{side === 'front' ? t('Front') : t('Back')}</h3>
               {#if ref}
-                <button class="icon-btn" onclick={() => (editing = side)} aria-label="Adjust the crop" title="Adjust"><Crop size={18} /></button>
-                <button class="icon-btn" onclick={() => set(side, null)} aria-label="Remove" title="Remove"><X size={18} /></button>
+                <button class="icon-btn" onclick={() => (editing = side)} aria-label={t('Adjust the crop')} title={t('Adjust')}><Crop size={18} /></button>
+                <button class="icon-btn" onclick={() => set(side, null)} aria-label={t('Remove')} title={t('Remove')}><X size={18} /></button>
               {/if}
             </div>
             <div class="slot" style:aspect-ratio={aspect}>
               {#if scanning === side}
-                <div class="center muted"><LoaderCircle class="spin" /> Scanning…</div>
+                <div class="center muted"><LoaderCircle class="spin" /> {t('Scanning…')}</div>
               {:else if ref}
                 <ItemThumb item={{ id: `${id}-${side}`, kind: 'page', ref }} max={300} />
               {:else}
-                <div class="center muted small">Not set yet</div>
+                <div class="center muted small">{t('Not set yet')}</div>
               {/if}
             </div>
             <div class="row wrap">
@@ -106,9 +106,9 @@
                 class="btn primary"
                 onclick={() => scan(side)}
                 disabled={!!scanning || !device.scan?.scanner || device.scan?.state === 'scanning'}
-                ><ScanLine size={17} /> Scan {side}</button
+                ><ScanLine size={17} /> {side === 'front' ? t('Scan front') : t('Scan back')}</button
               >
-              <button class="btn" onclick={() => fromFiles(side)} disabled={!!scanning}><FolderOpen size={17} /> From Files</button>
+              <button class="btn" onclick={() => fromFiles(side)} disabled={!!scanning}><FolderOpen size={17} /> {t('From Files')}</button>
             </div>
           </div>
         {/each}
@@ -116,12 +116,12 @@
       <div class="sheet">
         <div class="page"><ItemThumb item={card} max={420} /></div>
         <button class="btn ghost" onclick={turn}>
-          {#if card.vertical}<RectangleHorizontal size={17} /> Landscape card{:else}<RectangleVertical size={17} /> Portrait card{/if}
+          {#if card.vertical}<RectangleHorizontal size={17} /> {t('Landscape card')}{:else}<RectangleVertical size={17} /> {t('Portrait card')}{/if}
         </button>
       </div>
     </div>
     {#snippet footer()}
-      <button class="btn primary" onclick={onclose}>Done</button>
+      <button class="btn primary" onclick={onclose}>{t('Done')}</button>
     {/snippet}
   </Modal>
 
@@ -130,7 +130,7 @@
     <CropEditor
       ref={card[side]!}
       {aspect}
-      title={`Adjust the ${side}`}
+      title={side === 'front' ? t('Adjust the front') : t('Adjust the back')}
       onsave={(r) => set(side, r)}
       onclose={() => (editing = '')}
     />

@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { t } from '../lib/i18n.svelte';
   import FolderOpen from '@lucide/svelte/icons/folder-open';
   import Upload from '@lucide/svelte/icons/upload';
   import IdCard from '@lucide/svelte/icons/id-card';
@@ -40,7 +41,7 @@
   let input: HTMLInputElement;
 
   async function fromFiles() {
-    const fs = await pickFiles('Add pages from Files');
+    const fs = await pickFiles(t('Add pages from Files'));
     if (fs.length) await addFilesToWork(fs);
   }
 
@@ -52,7 +53,7 @@
       try {
         added.push(await addFile({ name: file.name, blob: file, source: 'upload' }));
       } catch (err) {
-        toast(`${file.name}: ${(err as Error).message}`, 'error');
+        toast(t('{name}: {error}', { name: file.name, error: (err as Error).message }), 'error');
       }
     }
     el.value = '';
@@ -80,7 +81,7 @@
   }
 
   function clear() {
-    if (confirm('Remove all pages from Process? Your files stay in Files.')) setItems([]);
+    if (confirm(t('Remove all pages from Process? Your files stay in Files.'))) setItems([]);
   }
 
   async function exportIt() {
@@ -88,13 +89,13 @@
     progress = 0;
     try {
       const f = await exportPdf(work.items, { paper, dpi, fallback: defaultPaper() }, (d, t) => (progress = d / t));
-      toast(`Saved ${f.name} to Files`, 'ok', [
-        { label: 'Print', run: () => openPrint(f) },
-        { label: 'Download', run: () => download(f.blob, f.name) },
-        { label: 'Open', run: () => openViewer(f) },
+      toast(t('Saved {name} to Files', { name: f.name }), 'ok', [
+        { label: t('Print'), run: () => openPrint(f) },
+        { label: t('Download'), run: () => download(f.blob, f.name) },
+        { label: t('Open'), run: () => openViewer(f) },
       ]);
     } catch (e) {
-      toast(`Export failed: ${(e as Error).message}`, 'error');
+      toast(t('Export failed: {error}', { error: (e as Error).message }), 'error');
     } finally {
       exporting = false;
     }
@@ -105,19 +106,19 @@
 
 <div class="head row wrap">
   <div class="grow">
-    <h1>Process</h1>
-    <p class="muted small">Put pages together, turn and crop them, make ID card copies, and save the result as a PDF.</p>
+    <h1>{t('Process')}</h1>
+    <p class="muted small">{t('Put pages together, turn and crop them, make ID card copies, and save the result as a PDF.')}</p>
   </div>
 </div>
 
 <div class="toolbar row wrap">
-  <button class="btn" onclick={fromFiles}><FolderOpen size={17} /> Add from Files</button>
-  <button class="btn" onclick={() => input.click()}><Upload size={17} /> Upload</button>
-  <button class="btn" onclick={card}><IdCard size={17} /> ID card copy</button>
+  <button class="btn" onclick={fromFiles}><FolderOpen size={17} /> {t('Add from Files')}</button>
+  <button class="btn" onclick={() => input.click()}><Upload size={17} /> {t('Upload')}</button>
+  <button class="btn" onclick={card}><IdCard size={17} /> {t('ID card copy')}</button>
   <input bind:this={input} type="file" accept="application/pdf,image/*" multiple hidden onchange={upload} />
   <span class="grow"></span>
   {#if work.items.length}
-    <button class="btn ghost danger" onclick={clear}>Clear</button>
+    <button class="btn ghost danger" onclick={clear}>{t('Clear')}</button>
   {/if}
 </div>
 
@@ -125,12 +126,12 @@
   <div class="card empty">
     <Layers size={40} strokeWidth={1.4} />
     <div>
-      <b>Nothing here yet</b>
-      <p class="small">Add scans, pictures or PDF pages from Files, or start an ID card copy: both sides of a card on one sheet.</p>
+      <b>{t('Nothing here yet')}</b>
+      <p class="small">{t('Add scans, pictures or PDF pages from Files, or start an ID card copy: both sides of a card on one sheet.')}</p>
     </div>
     <div class="row wrap" style="justify-content:center">
-      <button class="btn primary" onclick={fromFiles}><FolderOpen size={17} /> Add from Files</button>
-      <button class="btn" onclick={card}><IdCard size={17} /> ID card copy</button>
+      <button class="btn primary" onclick={fromFiles}><FolderOpen size={17} /> {t('Add from Files')}</button>
+      <button class="btn" onclick={card}><IdCard size={17} /> {t('ID card copy')}</button>
     </div>
   </div>
 {:else}
@@ -150,24 +151,24 @@
         <button
           class="preview"
           onclick={() => (it.kind === 'card' ? (carding = it.id) : (cropping = it.id))}
-          aria-label="Edit page {i + 1}"
+          aria-label={t('Edit page {page}', { page: i + 1 })}
         >
           <ItemThumb item={it} />
           <span class="num">{i + 1}</span>
-          {#if it.kind === 'card'}<span class="tag"><IdCard size={13} /> ID card</span>{/if}
+          {#if it.kind === 'card'}<span class="tag"><IdCard size={13} /> {t('ID card')}</span>{/if}
         </button>
         <div class="tools">
           {#if it.kind === 'page'}
-            <button class="icon-btn" onclick={() => rotate(it, -90)} title="Rotate left" aria-label="Rotate left"><RotateCcw size={17} /></button>
-            <button class="icon-btn" onclick={() => rotate(it, 90)} title="Rotate right" aria-label="Rotate right"><RotateCw size={17} /></button>
-            <button class="icon-btn" onclick={() => (cropping = it.id)} title="Crop" aria-label="Crop"><Crop size={17} /></button>
+            <button class="icon-btn" onclick={() => rotate(it, -90)} title={t('Rotate left')} aria-label={t('Rotate left')}><RotateCcw size={17} /></button>
+            <button class="icon-btn" onclick={() => rotate(it, 90)} title={t('Rotate right')} aria-label={t('Rotate right')}><RotateCw size={17} /></button>
+            <button class="icon-btn" onclick={() => (cropping = it.id)} title={t('Crop')} aria-label={t('Crop')}><Crop size={17} /></button>
           {:else}
-            <button class="icon-btn" onclick={() => (carding = it.id)} title="Edit" aria-label="Edit the card"><Pencil size={17} /></button>
+            <button class="icon-btn" onclick={() => (carding = it.id)} title={t('Edit')} aria-label={t('Edit the card')}><Pencil size={17} /></button>
           {/if}
           <span class="grow"></span>
-          <button class="icon-btn" onclick={() => moveItem(i, i - 1)} disabled={i === 0} title="Move earlier" aria-label="Move earlier"><ChevronLeft size={17} /></button>
-          <button class="icon-btn" onclick={() => moveItem(i, i + 1)} disabled={i === work.items.length - 1} title="Move later" aria-label="Move later"><ChevronRight size={17} /></button>
-          <button class="icon-btn" onclick={() => remove(it.id)} title="Remove" aria-label="Remove"><Trash2 size={17} /></button>
+          <button class="icon-btn" onclick={() => moveItem(i, i - 1)} disabled={i === 0} title={t('Move earlier')} aria-label={t('Move earlier')}><ChevronLeft size={17} /></button>
+          <button class="icon-btn" onclick={() => moveItem(i, i + 1)} disabled={i === work.items.length - 1} title={t('Move later')} aria-label={t('Move later')}><ChevronRight size={17} /></button>
+          <button class="icon-btn" onclick={() => remove(it.id)} title={t('Remove')} aria-label={t('Remove')}><Trash2 size={17} /></button>
         </div>
       </li>
     {/each}
@@ -175,19 +176,19 @@
 
   <section class="card card-pad export">
     <div class="field">
-      <span class="label">Page size</span>
+      <span class="label">{t('Page size')}</span>
       <div class="seg">
-        <button class:on={paper === 'a4'} onclick={() => (paper = 'a4')}>A4</button>
-        <button class:on={paper === 'letter'} onclick={() => (paper = 'letter')}>Letter</button>
-        <button class:on={paper === 'original'} onclick={() => (paper = 'original')}>As cropped</button>
+        <button class:on={paper === 'a4'} onclick={() => (paper = 'a4')}>{t('A4')}</button>
+        <button class:on={paper === 'letter'} onclick={() => (paper = 'letter')}>{t('Letter')}</button>
+        <button class:on={paper === 'original'} onclick={() => (paper = 'original')}>{t('As cropped')}</button>
       </div>
     </div>
     <div class="field">
-      <span class="label">Quality</span>
+      <span class="label">{t('Quality')}</span>
       <div class="seg">
-        <button class:on={dpi === 150} onclick={() => (dpi = 150)}>Small</button>
-        <button class:on={dpi === 200} onclick={() => (dpi = 200)}>Standard</button>
-        <button class:on={dpi === 300} onclick={() => (dpi = 300)}>Best</button>
+        <button class:on={dpi === 150} onclick={() => (dpi = 150)}>{t('Small')}</button>
+        <button class:on={dpi === 200} onclick={() => (dpi = 200)}>{t('Standard')}</button>
+        <button class:on={dpi === 300} onclick={() => (dpi = 300)}>{t('Best')}</button>
       </div>
     </div>
     <div class="go">
@@ -196,9 +197,9 @@
       {/if}
       <button class="btn primary big" onclick={exportIt} disabled={exporting}>
         {#if exporting}<LoaderCircle size={18} class="spin" />{:else}<FileDown size={18} />{/if}
-        Save as PDF
+        {t('Save as PDF')}
       </button>
-      <span class="small muted">Saved to <a href="#/files" onclick={() => go('files')}>Files</a>, ready to print or download.</span>
+      <span class="small muted"><a href="#/files" onclick={() => go('files')}>{t('Saved to Files, ready to print or download.')}</a></span>
     </div>
   </section>
 {/if}

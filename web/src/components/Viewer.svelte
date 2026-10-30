@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { t, i18n } from '../lib/i18n.svelte';
   import { onDestroy } from 'svelte';
   import Printer from '@lucide/svelte/icons/printer';
   import Download from '@lucide/svelte/icons/download';
@@ -54,18 +55,18 @@
 
   async function toWork() {
     const n = await addFilesToWork([file]);
-    toast(`${n} page${n === 1 ? '' : 's'} added to Process`, 'ok', [{ label: 'Open', run: () => go('process') }]);
+    toast(n === 1 ? t('{count} page added to Process', { count: n }) : t('{count} pages added to Process', { count: n }), 'ok', [{ label: t('Open'), run: () => go('process') }]);
   }
 
   async function del() {
-    if (!confirm(`Delete "${file.name}" from this browser?`)) return;
+    if (!confirm(t('Delete "{name}" from this browser?', { name: file.name }))) return;
     await removeFile(file.id);
     onclose();
   }
 </script>
 
 <Modal title={file.name} {onclose} wide>
-  <div class="view">
+  <div class="view" lang={i18n.locale}>
     {#if isPdf}
       <div class="pages" bind:this={pagesEl}></div>
       {#if loading}<div class="center"><LoaderCircle class="spin" /></div>{/if}
@@ -78,10 +79,10 @@
     <span class="grow small muted">
       {formatSize(file.size)}{file.dpi ? ` · ${file.dpi} dpi` : ''}{file.width && !isPdf ? ` · ${file.width} × ${file.height} px` : ''}
     </span>
-    <button class="btn ghost danger" onclick={del} aria-label="Delete"><Trash2 size={17} /></button>
-    <button class="btn" onclick={toWork}><Layers size={17} /> Process</button>
-    <button class="btn" onclick={() => download(file.blob, file.name)}><Download size={17} /> Download</button>
-    <button class="btn primary" onclick={print}><Printer size={17} /> Print</button>
+    <button class="btn ghost danger" onclick={del} aria-label={t('Delete')}><Trash2 size={17} /></button>
+    <button class="btn" onclick={toWork}><Layers size={17} /> {t('Process')}</button>
+    <button class="btn" onclick={() => download(file.blob, file.name)}><Download size={17} /> {t('Download')}</button>
+    <button class="btn primary" onclick={print}><Printer size={17} /> {t('Print')}</button>
   {/snippet}
 </Modal>
 

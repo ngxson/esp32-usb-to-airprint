@@ -42,3 +42,19 @@ test('structure and pdf.js', async () => {
   assert.equal(images, 2);
   await task.destroy();
 });
+
+for (const title of ['文档 (扫描件) 😀 \\ 原件', 'Document (scan) \\ original']) {
+  test(`PDF title round-trips through pdf.js: ${title}`, async () => {
+    const blob = buildPdf([{ w: 595.28, h: 841.89, images: [] }], title);
+    const { getDocument } = await import('pdfjs-dist/legacy/build/pdf.mjs');
+    const task = getDocument({ data: new Uint8Array(await blob.arrayBuffer()) });
+    try {
+      const doc = await task.promise;
+      const metadata = await doc.getMetadata();
+      assert.equal(metadata.info.Title, title);
+      assert.equal(doc.numPages, 1);
+    } finally {
+      await task.destroy();
+    }
+  });
+}

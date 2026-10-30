@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { t } from '../lib/i18n.svelte';
   import ScanLine from '@lucide/svelte/icons/scan-line';
   import CircleStop from '@lucide/svelte/icons/circle-stop';
   import Printer from '@lucide/svelte/icons/printer';
@@ -12,7 +13,6 @@
     cancelScan,
     scanProgress,
     scanUi,
-    sourceLabel,
     startKept,
     startStream,
     type ScanPaper,
@@ -46,16 +46,28 @@
   const aspect = $derived(paper === 'card' ? 2400 / 1700 : paper === 'letter' ? 8.5 / 11 : 210 / 297);
   const printerBusy = $derived(device.printer?.state === 'processing');
 
+  function sourceLabel(source: string): string {
+    if (source === 'button') return t('the button on the printer');
+    if (source === 'escl') return t('a computer (AirScan)');
+    if (source === 'web' || source === 'stream') return t('the web page');
+    return source;
+  }
+
   const statusText = $derived.by(() => {
     if (!st) return '';
     if (scanning) {
-      const who = st.source && st.source !== 'web' && st.source !== 'stream' ? ` · started from ${sourceLabel(st.source)}` : '';
-      if (!st.lines) return `Warming up and calibrating…${who}`;
-      return `Scanning ${Math.round(progress * 100)}% · ${formatSize(scanUi.received || st.bytes)}${who}`;
+      const source = st.source && st.source !== 'web' && st.source !== 'stream' ? sourceLabel(st.source) : '';
+      if (!st.lines) return source
+        ? t('Warming up and calibrating… · started from {source}', { source })
+        : t('Warming up and calibrating…');
+      const params = { percent: Math.round(progress * 100), size: formatSize(scanUi.received || st.bytes), source };
+      return source ? t('Scanning {percent}% · {size} · started from {source}', params) : t('Scanning {percent}% · {size}', params);
     }
-    if (st.state === 'failed') return `Scan failed: ${st.error}`;
-    if (st.state === 'canceled') return 'Canceled';
-    if (st.state === 'done') return `Done: ${st.width} × ${st.height} pixels at ${st.dpi} dpi in ${Math.round(st.elapsed)} s`;
+    if (st.state === 'failed') return t('Scan failed: {error}', { error: st.error });
+    if (st.state === 'canceled') return t('Canceled');
+    if (st.state === 'done') return t('Done: {width} × {height} pixels at {dpi} dpi in {seconds} s', {
+      width: st.width, height: st.height, dpi: st.dpi, seconds: Math.round(st.elapsed),
+    });
     return '';
   });
 
@@ -79,51 +91,50 @@
 
 <div class="layout">
   <section class="card card-pad settings">
-    <h2>Scan</h2>
+    <h2>{t('Scan')}</h2>
     <div class="field">
-      <span class="label">Original</span>
+      <span class="label">{t('Original')}</span>
       <div class="seg">
-        <button class:on={paper === 'a4'} onclick={() => (paper = 'a4')} disabled={scanning}>A4</button>
-        <button class:on={paper === 'letter'} onclick={() => (paper = 'letter')} disabled={scanning}>Letter</button>
-        <button class:on={paper === 'card'} onclick={() => (paper = 'card')} disabled={scanning}>ID card</button>
+        <button class:on={paper === 'a4'} onclick={() => (paper = 'a4')} disabled={scanning}>{t('A4')}</button>
+        <button class:on={paper === 'letter'} onclick={() => (paper = 'letter')} disabled={scanning}>{t('Letter')}</button>
+        <button class:on={paper === 'card'} onclick={() => (paper = 'card')} disabled={scanning}>{t('ID card')}</button>
       </div>
       {#if paper === 'card'}
-        <p class="muted small">Put the card in the corner of the glass, by the arrow. Only that corner is scanned, which is quick.</p>
+        <p class="muted small">{t('Put the card in the corner of the glass, by the arrow. Only that corner is scanned, which is quick.')}</p>
       {/if}
     </div>
     <div class="field">
-      <span class="label">Resolution</span>
+      <span class="label">{t('Resolution')}</span>
       <div class="seg">
         {#each [150, 300, 600] as d}
-          <button class:on={dpi === d} onclick={() => (dpi = d)} disabled={scanning}>{d} dpi</button>
+          <button class:on={dpi === d} onclick={() => (dpi = d)} disabled={scanning}>{t('{dpi} dpi', { dpi: d })}</button>
         {/each}
       </div>
       <p class="muted small">
-        {#if dpi === 150}Quick, for reading on screen.{:else if dpi === 300}Documents and copies.{:else}Photos. Slow, and only this browser receives it: keep this page open.{/if}
+        {#if dpi === 150}{t('Quick, for reading on screen.')}{:else if dpi === 300}{t('Documents and copies.')}{:else}{t('Photos. Slow, and only this browser receives it: keep this page open.')}{/if}
       </p>
     </div>
     <div class="go">
       {#if scanning}
-        <button class="btn big danger" onclick={cancelScan}><CircleStop size={18} /> Cancel</button>
+        <button class="btn big danger" onclick={cancelScan}><CircleStop size={18} /> {t('Cancel')}</button>
       {:else}
         <button
           class="btn primary big"
           onclick={scan}
           disabled={starting || !device.online || !st?.scanner || printerBusy}
         >
-          {#if starting}<LoaderCircle size={18} class="spin" />{:else}<ScanLine size={18} />{/if} Scan
+          {#if starting}<LoaderCircle size={18} class="spin" />{:else}<ScanLine size={18} />{/if} {t('Scan')}
         </button>
       {/if}
     </div>
     {#if device.loaded && !st?.scanner}
-      <p class="err small">No scanner: is the printer on and connected?</p>
+      <p class="err small">{t('No scanner: is the printer on and connected?')}</p>
     {:else if printerBusy}
-      <p class="muted small">The printer is printing; scan when it is done.</p>
+      <p class="muted small">{t('The printer is printing; scan when it is done.')}</p>
     {/if}
     {#if st?.button}
       <p class="muted small hint">
-        The button on the printer box scans too ({st.button.paper === 'letter' ? 'Letter' : 'A4'}, {st.button.dpi} dpi).
-        Every open page receives the scan.
+        {t('The button on the printer box scans too ({paper}, {dpi} dpi). Every open page receives the scan.', { paper: st.button.paper === 'letter' ? t('Letter') : t('A4'), dpi: st.button.dpi })}
       </p>
     {/if}
   </section>
@@ -131,11 +142,11 @@
   <section class="card preview-card">
     <div class="paper" style:aspect-ratio={aspect} style:width={`min(100%, 520px, calc(70vh * ${aspect}))`}>
       {#if scanUi.preview && (scanning || st?.state === 'done' || scanUi.lastFile)}
-        <img src={scanUi.preview} alt="Scanned page" />
+        <img src={scanUi.preview} alt={t('Scanned page')} />
       {:else}
         <div class="placeholder muted">
           <ScanLine size={36} strokeWidth={1.4} />
-          <span>{scanning ? 'Warming up…' : 'The page appears here while it is scanned'}</span>
+          <span>{scanning ? t('Warming up…') : t('The page appears here while it is scanned')}</span>
         </div>
       {/if}
       {#if scanning}
@@ -147,19 +158,23 @@
         <div class="bar"><div style:width={`${Math.max(2, progress * 100)}%`}></div></div>
       {/if}
       <p class:err={st?.state === 'failed'} class="small">{statusText}</p>
-      {#if scanUi.error}<p class="err small">{scanUi.error}</p>{/if}
+      {#if scanUi.error}
+        <p class="err small">{scanUi.error.lost
+          ? t('Lost the scan: {message}', { message: scanUi.error.cause.message })
+          : scanUi.error.cause.message}</p>
+      {/if}
       {#if scanUi.lastFile && !scanning}
         {@const f = scanUi.lastFile}
         <div class="row wrap actions">
-          <button class="btn primary" onclick={() => openPrint(f)}><Printer size={17} /> Print a copy</button>
+          <button class="btn primary" onclick={() => openPrint(f)}><Printer size={17} /> {t('Print a copy')}</button>
           <button
             class="btn"
             onclick={async () => {
               await addFilesToWork([f]);
-              toast('Added to Process', 'ok', [{ label: 'Open', run: () => go('process') }]);
-            }}><Layers size={17} /> Process</button
+              toast(t('Added to Process'), 'ok', [{ label: t('Open'), run: () => go('process') }]);
+            }}><Layers size={17} /> {t('Process')}</button
           >
-          <button class="btn ghost" onclick={() => download(f.blob, f.name)}><Download size={17} /> Download</button>
+          <button class="btn ghost" onclick={() => download(f.blob, f.name)}><Download size={17} /> {t('Download')}</button>
         </div>
       {/if}
     </div>
@@ -167,7 +182,7 @@
 
   {#if recent.length}
     <section class="recent">
-      <div class="row"><h2 class="grow">Recent scans</h2><a href="#/files" class="small">All files</a></div>
+      <div class="row"><h2 class="grow">{t('Recent scans')}</h2><a href="#/files" class="small">{t('All files')}</a></div>
       <div class="strip">
         {#each recent as f (f.id)}
           <button class="thumb" onclick={() => openViewer(f)} title={f.name}>

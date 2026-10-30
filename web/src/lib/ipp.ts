@@ -1,6 +1,8 @@
 // Just enough IPP (RFC 8010/8011) to print from the browser: requests are
 // built here and POSTed to /ipp/print, the device's own printer URI.
 
+import { t, type Message } from './i18n.ts';
+
 export const OP = {
   PRINT_JOB: 0x0002,
   CANCEL_JOB: 0x0008,
@@ -111,7 +113,7 @@ export function statusOk(status: number): boolean {
   return status < 0x100;
 }
 
-const STATUS_TEXT: Record<number, string> = {
+const STATUS_TEXT: Record<number, Message> = {
   0x0400: 'bad request',
   0x0406: 'not found',
   0x040a: 'document format not supported',
@@ -122,7 +124,9 @@ const STATUS_TEXT: Record<number, string> = {
 
 export function statusText(r: IppResponse): string {
   const msg = r.attrs['status-message']?.[0];
-  return msg ? String(msg) : STATUS_TEXT[r.status] || `IPP status 0x${r.status.toString(16).padStart(4, '0')}`;
+  if (msg) return String(msg);
+  const key = STATUS_TEXT[r.status];
+  return key ? t(key) : t('IPP status 0x{status}', { status: r.status.toString(16).padStart(4, '0') });
 }
 
 function user(): string {

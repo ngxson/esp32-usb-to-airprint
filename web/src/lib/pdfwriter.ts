@@ -1,6 +1,8 @@
 // A minimal PDF writer: pages made of JPEG images (what the Process tab
 // exports). Images are embedded as they are (DCTDecode), no re-encoding.
 
+import { t } from './i18n.ts';
+
 export interface PdfImage {
   jpeg: Uint8Array;
   px: number; // pixel size
@@ -20,7 +22,7 @@ export interface PdfPage {
 const enc = new TextEncoder();
 const n2 = (v: number) => (Math.round(v * 100) / 100).toString();
 
-export function buildPdf(pages: PdfPage[], title = 'Document'): Blob {
+export function buildPdf(pages: PdfPage[], title = t('Document')): Blob {
   const parts: BlobPart[] = [];
   const offsets: number[] = [];
   let pos = 0;
@@ -48,7 +50,11 @@ export function buildPdf(pages: PdfPage[], title = 'Document'): Blob {
   obj(1, '<< /Type /Catalog /Pages 2 0 R >>');
   obj(2, `<< /Type /Pages /Kids [${pageIds.map((i) => `${i} 0 R`).join(' ')}] /Count ${pages.length} >>`);
   const safeTitle = title.replace(/[\\()]/g, (c) => '\\' + c).replace(/[^\x20-\x7e]/g, '?');
-  obj(3, `<< /Title (${safeTitle}) /Producer (Printer web UI) >>`);
+  // PDF text strings use UTF-16BE with a BOM for non-ASCII titles.
+  const pdfTitle = /[^\x20-\x7e]/.test(title)
+    ? '<feff' + Array.from({ length: title.length }, (_, i) => title.charCodeAt(i).toString(16).padStart(4, '0')).join('') + '>'
+    : `(${safeTitle})`;
+  obj(3, `<< /Title ${pdfTitle} /Producer (Printer web UI) >>`);
   for (const { pg, id, content, imgs } of plan) {
     const xobjs = imgs.map((iid, i) => `/Im${i} ${iid} 0 R`).join(' ');
     obj(

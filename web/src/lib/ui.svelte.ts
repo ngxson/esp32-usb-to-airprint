@@ -1,5 +1,7 @@
 // App-wide UI state: toasts, the print dialog, the file viewer, the file picker.
 
+import { i18n } from './i18n.svelte';
+import type { Locale } from './i18n';
 import type { StoredFile } from './db';
 
 export interface ToastAction {
@@ -10,6 +12,8 @@ export interface ToastAction {
 export interface Toast {
   id: number;
   text: string;
+  locale: Locale;
+  textLang?: ''; // empty means the language of the text is unknown
   kind: 'info' | 'ok' | 'error';
   actions: ToastAction[];
 }
@@ -24,9 +28,9 @@ export const ui = new Ui();
 
 let seq = 0;
 
-export function toast(text: string, kind: Toast['kind'] = 'info', actions: ToastAction[] = [], ms = 5000) {
+export function toast(text: string, kind: Toast['kind'] = 'info', actions: ToastAction[] = [], ms = 5000, textLang?: '') {
   const id = ++seq;
-  ui.toasts = [...ui.toasts.slice(-3), { id, text, kind, actions }];
+  ui.toasts = [...ui.toasts.slice(-3), { id, text, kind, actions, locale: i18n.locale, textLang }];
   if (ms) setTimeout(() => dismiss(id), actions.length ? ms * 2 : ms);
   return id;
 }

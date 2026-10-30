@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { t, i18n } from '../lib/i18n.svelte';
   import LoaderCircle from '@lucide/svelte/icons/loader-circle';
   import { layoutItem, renderRef, renderSheet, refSize, type Item } from '../lib/process.svelte';
   import { defaultPaper } from '../lib/layout';
@@ -49,11 +50,11 @@
   });
 </script>
 
-<div class="thumb">
+<div class="thumb" lang={i18n.locale}>
   {#if url}
     <img src={url} alt="" />
   {:else if missing}
-    <span class="muted small">File deleted</span>
+    <span class="muted small">{t('File deleted')}</span>
   {:else if busy}
     <LoaderCircle class="spin" />
   {/if}

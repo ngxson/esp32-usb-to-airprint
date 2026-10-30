@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { t, i18n } from '../lib/i18n.svelte';
   import Upload from '@lucide/svelte/icons/upload';
   import Check from '@lucide/svelte/icons/check';
   import Modal from './Modal.svelte';
@@ -36,7 +37,7 @@
       try {
         added.push(await addFile({ name: file.name, blob: file, source: 'upload' }));
       } catch (err) {
-        toast(`${file.name}: ${(err as Error).message}`, 'error');
+        toast(t('{name}: {error}', { name: file.name, error: (err as Error).message }), 'error');
       }
     }
     el.value = '';
@@ -46,9 +47,9 @@
 </script>
 
 <Modal {title} onclose={() => finish([])} wide>
-  <div class="pick">
+  <div class="pick" lang={i18n.locale}>
     {#if !files.list.length}
-      <p class="muted empty">No files yet: upload one.</p>
+      <p class="muted empty">{t('No files yet: upload one.')}</p>
     {/if}
     <ul>
       {#each files.list as f (f.id)}
@@ -64,14 +65,14 @@
   </div>
   <input bind:this={input} type="file" accept="application/pdf,image/*" multiple={multi} hidden onchange={upload} />
   {#snippet footer()}
-    <button class="btn" onclick={() => input.click()}><Upload size={17} /> Upload</button>
+    <button class="btn" onclick={() => input.click()}><Upload size={17} /> {t('Upload')}</button>
     <span class="grow"></span>
     {#if multi}
       <button
         class="btn primary"
         disabled={!chosen.length}
         onclick={() => finish(chosen.map((id) => files.list.find((f) => f.id === id)).filter((f): f is StoredFile => !!f))}
-        >Add {chosen.length || ''}</button
+        >{chosen.length ? t('Add {count}', { count: chosen.length }) : t('Add')}</button
       >
     {/if}
   {/snippet}

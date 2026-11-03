@@ -2,6 +2,8 @@
 //   files  {id, name, type, size, created, source, blob, thumb, ...}
 //   kv     small values (the Process workspace, imported scan ids)
 
+import { t } from './i18n.ts';
+
 const DB_NAME = 'printer-web';
 const VERSION = 1;
 
@@ -21,6 +23,13 @@ export interface StoredFile {
   scanId?: string;
 }
 
+// Keep the message lazy: persistent errors must follow later language changes.
+class FileStoreBlockedError extends Error {
+  override get message() {
+    return t('the file store is open in an older tab; close it and reload');
+  }
+}
+
 let dbp: Promise<IDBDatabase> | null = null;
 
 function open(): Promise<IDBDatabase> {
@@ -33,7 +42,7 @@ function open(): Promise<IDBDatabase> {
     };
     r.onsuccess = () => resolve(r.result);
     r.onerror = () => reject(r.error);
-    r.onblocked = () => reject(new Error('the file store is open in an older tab; close it and reload'));
+    r.onblocked = () => reject(new FileStoreBlockedError());
   });
   return dbp;
 }

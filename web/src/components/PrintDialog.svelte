@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { t, i18n } from '../lib/i18n.svelte';
   import { onDestroy } from 'svelte';
   import Printer from '@lucide/svelte/icons/printer';
   import ChevronLeft from '@lucide/svelte/icons/chevron-left';
@@ -50,7 +51,12 @@
   type Phase = 'setup' | 'render' | 'send' | 'finish';
   let phase = $state<Phase>('setup');
   let frac = $state(0);
-  let detail = $state('');
+  let preparingPage = $state(1);
+  let preparingTotal = $state(1);
+  const detail = $derived(phase === 'render'
+    ? t('Preparing page {page} of {total}', { page: preparingPage, total: preparingTotal })
+    : phase === 'finish' ? t('Finishing the last page')
+    : t('Sending to the printer'));
   let abort: AbortController | null = null;
   let closed = false;
 
@@ -64,10 +70,10 @@
   const selected = $derived(parseRanges(range, count));
   const p = $derived(device.printer);
   const blocker = $derived.by(() => {
-    if (!device.online) return 'The printer box is not reachable.';
-    if (!p?.connected) return 'No printer is connected to the printer box.';
-    if (p.state === 'processing') return 'The printer is busy with another job.';
-    if (device.scan?.state === 'scanning') return 'The printer is scanning.';
+    if (!device.online) return t('The printer box is not reachable.');
+    if (!p?.connected) return t('No printer is connected to the printer box.');
+    if (p.state === 'processing') return t('The printer is busy with another job.');
+    if (device.scan?.state === 'scanning') return t('The printer is scanning.');
     return '';
   });
 
@@ -124,13 +130,13 @@
         o,
         (done, total) => {
           frac = done / total;
-          detail = `Preparing page ${Math.min(total, Math.floor(done) + 1)} of ${total}`;
+          preparingPage = Math.min(total, Math.floor(done) + 1);
+          preparingTotal = total;
         },
         signal,
       );
       phase = 'send';
       frac = 0;
-      detail = 'Sending to the printer';
       await sendJob(
         doc,
         name,
@@ -138,18 +144,17 @@
           frac = f;
           if (f >= 1) {
             phase = 'finish';
-            detail = 'Finishing the last page';
           }
         },
         signal,
       );
-      toast(`Printed ${sheets} page${sheets === 1 ? '' : 's'} of ${name}`, 'ok');
+      toast(sheets === 1 ? t('Printed {count} page of {name}', { count: sheets, name }) : t('Printed {count} pages of {name}', { count: sheets, name }), 'ok');
       if (!closed) onclose();
     } catch (e) {
       if ((e as Error).name === 'AbortError') {
-        toast('Print canceled');
+        toast(t('Print canceled'));
       } else {
-        toast(`Print failed: ${(e as Error).message}`, 'error', [], 9000);
+        toast(t('Print failed: {error}', { error: (e as Error).message }), 'error', [], 9000);
       }
       phase = 'setup';
     } finally {
@@ -174,8 +179,8 @@
   });
 </script>
 
-<Modal title="Print {file.name}" onclose={close} wide>
-  <div class="layout">
+<Modal title={t('Print {name}', { name: file.name })} onclose={close} wide>
+  <div class="layout" lang={i18n.locale}>
     <div class="left">
       <div class="preview" bind:this={previewEl} style:aspect-ratio={`${PAPERS[paper].w} / ${PAPERS[paper].h}`}>
         <div class="margins" style={marginStyle}></div>
@@ -184,12 +189,12 @@
       </div>
       {#if count > 1}
         <div class="pager row">
-          <button class="icon-btn" onclick={() => pageIdx--} disabled={pageIdx === 0} aria-label="Previous page"><ChevronLeft /></button>
-          <span class="small muted">Page {pageIdx + 1} of {count}</span>
-          <button class="icon-btn" onclick={() => pageIdx++} disabled={pageIdx >= count - 1} aria-label="Next page"><ChevronRight /></button>
+          <button class="icon-btn" onclick={() => pageIdx--} disabled={pageIdx === 0} aria-label={t('Previous page')}><ChevronLeft /></button>
+          <span class="small muted">{t('Page {page} of {count}', { page: pageIdx + 1, count })}</span>
+          <button class="icon-btn" onclick={() => pageIdx++} disabled={pageIdx >= count - 1} aria-label={t('Next page')}><ChevronRight /></button>
         </div>
       {/if}
-      <p class="small muted center">The dashed line shows what the printer can reach.</p>
+      <p class="small muted center">{t('The dashed line shows what the printer can reach.')}</p>
     </div>
 
     <div class="opts">
@@ -199,67 +204,67 @@
           <div class="bar"><div style:width={`${Math.max(2, frac * 100)}%`}></div></div>
           <p class="small muted">
             {#if phase === 'render'}
-              Pages are prepared here in the browser, then sent.
+              {t('Pages are prepared here in the browser, then sent.')}
             {:else}
-              The printer prints while it receives. You can close this window; progress shows on the Printer page.
+              {t('The printer prints while it receives. You can close this window; progress shows on the Printer page.')}
             {/if}
           </p>
-          <button class="btn danger" onclick={() => abort?.abort()}>Cancel</button>
+          <button class="btn danger" onclick={() => abort?.abort()}>{t('Cancel')}</button>
         </div>
       {/if}
       <fieldset disabled={phase !== 'setup'}>
         <div class="field">
-          <span class="label">Copies</span>
+          <span class="label">{t('Copies')}</span>
           <div class="stepper">
-            <button class="icon-btn" onclick={() => (copies = Math.max(1, copies - 1))} aria-label="Fewer"><Minus size={16} /></button>
-            <input class="input" type="number" min="1" max="99" bind:value={copies} aria-label="Copies" />
-            <button class="icon-btn" onclick={() => (copies = Math.min(99, copies + 1))} aria-label="More"><Plus size={16} /></button>
+            <button class="icon-btn" onclick={() => (copies = Math.max(1, copies - 1))} aria-label={t('Fewer')}><Minus size={16} /></button>
+            <input class="input" type="number" min="1" max="99" bind:value={copies} aria-label={t('Copies')} />
+            <button class="icon-btn" onclick={() => (copies = Math.min(99, copies + 1))} aria-label={t('More')}><Plus size={16} /></button>
           </div>
         </div>
         {#if count > 1}
           <div class="field">
-            <span class="label">Pages</span>
-            <input class="input" placeholder="All {count} pages, or e.g. 1-3, 5" bind:value={range} />
-            {#if !selected}<span class="err small">Pages 1 to {count}, e.g. "1-3, 5"</span>{/if}
+            <span class="label">{t('Pages')}</span>
+            <input class="input" placeholder={t('All {count} pages, or e.g. 1-3, 5', { count })} bind:value={range} />
+            {#if !selected}<span class="err small">{t('Pages 1 to {count}, e.g. "1-3, 5"', { count })}</span>{/if}
           </div>
         {/if}
         <div class="field">
-          <span class="label">Paper</span>
+          <span class="label">{t('Paper')}</span>
           <div class="seg">
             <button class:on={paper === 'a4'} onclick={() => (paper = 'a4')}>A4</button>
-            <button class:on={paper === 'letter'} onclick={() => (paper = 'letter')}>Letter</button>
+            <button class:on={paper === 'letter'} onclick={() => (paper = 'letter')}>{t('Letter')}</button>
           </div>
         </div>
         <div class="field">
-          <span class="label">Size</span>
+          <span class="label">{t('Size')}</span>
           <div class="seg">
-            <button class:on={fit === 'fit'} onclick={() => (fit = 'fit')}>Fit to page</button>
-            <button class:on={fit === 'fill'} onclick={() => (fit = 'fill')}>Fill page</button>
-            <button class:on={fit === 'actual'} onclick={() => (fit = 'actual')}>Actual size</button>
+            <button class:on={fit === 'fit'} onclick={() => (fit = 'fit')}>{t('Fit to page')}</button>
+            <button class:on={fit === 'fill'} onclick={() => (fit = 'fill')}>{t('Fill page')}</button>
+            <button class:on={fit === 'actual'} onclick={() => (fit = 'actual')}>{t('Actual size')}</button>
           </div>
         </div>
         <div class="field">
-          <span class="label">Orientation</span>
+          <span class="label">{t('Orientation')}</span>
           <div class="seg">
-            <button class:on={orientation === 'auto'} onclick={() => (orientation = 'auto')}>Auto</button>
-            <button class:on={orientation === 'portrait'} onclick={() => (orientation = 'portrait')}>Portrait</button>
-            <button class:on={orientation === 'landscape'} onclick={() => (orientation = 'landscape')}>Landscape</button>
+            <button class:on={orientation === 'auto'} onclick={() => (orientation = 'auto')}>{t('Auto')}</button>
+            <button class:on={orientation === 'portrait'} onclick={() => (orientation = 'portrait')}>{t('Portrait')}</button>
+            <button class:on={orientation === 'landscape'} onclick={() => (orientation = 'landscape')}>{t('Landscape')}</button>
           </div>
         </div>
         <div class="field">
-          <span class="label">Color</span>
+          <span class="label">{t('Color')}</span>
           <div class="seg">
-            <button class:on={!gray} onclick={() => (gray = false)}>Color</button>
-            <button class:on={gray} onclick={() => (gray = true)}>Black &amp; white</button>
+            <button class:on={!gray} onclick={() => (gray = false)}>{t('Color')}</button>
+            <button class:on={gray} onclick={() => (gray = true)}>{t('Black & white')}</button>
           </div>
         </div>
         <div class="field">
-          <span class="label">Quality</span>
+          <span class="label">{t('Quality')}</span>
           <div class="seg">
-            <button class:on={dpi === 600} onclick={() => (dpi = 600)}>Standard · 600 dpi</button>
-            <button class:on={dpi === 300} onclick={() => (dpi = 300)}>Fast · 300 dpi</button>
+            <button class:on={dpi === 600} onclick={() => (dpi = 600)}>{t('Standard · 600 dpi')}</button>
+            <button class:on={dpi === 300} onclick={() => (dpi = 300)}>{t('Fast · 300 dpi')}</button>
           </div>
-          <span class="small muted">300 dpi sends a quarter of the data: quicker for photos.</span>
+          <span class="small muted">{t('300 dpi sends a quarter of the data: quicker for photos.')}</span>
         </div>
       </fieldset>
     </div>
@@ -273,9 +278,9 @@
         <span class="muted">{p?.name} · {inkSummary(p)}</span>
       {/if}
     </div>
-    <button class="btn" onclick={close}>{phase === 'setup' ? 'Cancel' : 'Hide'}</button>
+    <button class="btn" onclick={close}>{phase === 'setup' ? t('Cancel') : t('Hide')}</button>
     <button class="btn primary" onclick={print} disabled={!src || !selected?.length || !!blocker || phase !== 'setup'}>
-      <Printer size={17} /> Print {selected && selected.length * copies > 1 ? `${selected.length * copies} pages` : ''}
+      <Printer size={17} /> {selected && selected.length * copies > 1 ? t('Print {count} pages', { count: selected.length * copies }) : t('Print')}
     </button>
   {/snippet}
 </Modal>

@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { t, i18n } from '../lib/i18n.svelte';
   import RotateCcw from '@lucide/svelte/icons/rotate-ccw';
   import RotateCw from '@lucide/svelte/icons/rotate-cw';
   import WandSparkles from '@lucide/svelte/icons/wand-sparkles';
@@ -12,7 +13,7 @@
   let {
     ref,
     aspect = null,
-    title = 'Crop and rotate',
+    title,
     onsave,
     onclose,
   }: {
@@ -111,7 +112,7 @@
     const ctx = small.getContext('2d', { willReadFrequently: true })!;
     ctx.drawImage(canvas, 0, 0, w, h);
     const box = detectContent(ctx.getImageData(0, 0, w, h).data, w, h);
-    if (!box) return toast('Could not find an object on the page', 'error');
+    if (!box) return toast(t('Could not find an object on the page'), 'error');
     // a little margin around it
     const m = 0.006;
     const b = { x: Math.max(0, box.x - m), y: Math.max(0, box.y - m), w: 0, h: 0 };
@@ -185,10 +186,10 @@
   const handles: Handle[] = $derived(aspect ? ['nw', 'ne', 'sw', 'se'] : ['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w']);
 </script>
 
-<Modal {title} {onclose} wide>
-  <div class="wrap" bind:this={wrapEl} onpointermove={move} onpointerup={up} onpointercancel={up} role="presentation">
+<Modal title={title ?? t('Crop and rotate')} {onclose} wide>
+  <div class="wrap" lang={i18n.locale} bind:this={wrapEl} onpointermove={move} onpointerup={up} onpointercancel={up} role="presentation">
     <div class="stage" bind:this={stage} style:width={`${imgW * fitScale}px`} style:height={`${imgH * fitScale}px`}>
-      {#if url}<img src={url} alt="Page" draggable="false" />{/if}
+      {#if url}<img src={url} alt={t('Page')} draggable="false" />{/if}
       {#if busy}<div class="loading"><LoaderCircle class="spin" /></div>{/if}
       {#if !busy}
         <div
@@ -209,13 +210,13 @@
   </div>
   {#snippet footer()}
     <div class="row wrap grow">
-      <button class="icon-btn" onclick={() => rotate(-90)} aria-label="Rotate left" title="Rotate left"><RotateCcw size={19} /></button>
-      <button class="icon-btn" onclick={() => rotate(90)} aria-label="Rotate right" title="Rotate right"><RotateCw size={19} /></button>
-      <button class="btn ghost" onclick={auto}><WandSparkles size={17} /> Auto-detect</button>
-      <button class="btn ghost" onclick={() => (crop = enforce({ x: 0, y: 0, w: 1, h: 1 }))}><Maximize2 size={17} /> Whole page</button>
+      <button class="icon-btn" onclick={() => rotate(-90)} aria-label={t('Rotate left')} title={t('Rotate left')}><RotateCcw size={19} /></button>
+      <button class="icon-btn" onclick={() => rotate(90)} aria-label={t('Rotate right')} title={t('Rotate right')}><RotateCw size={19} /></button>
+      <button class="btn ghost" onclick={auto}><WandSparkles size={17} /> {t('Auto-detect')}</button>
+      <button class="btn ghost" onclick={() => (crop = enforce({ x: 0, y: 0, w: 1, h: 1 }))}><Maximize2 size={17} /> {t('Whole page')}</button>
     </div>
-    <button class="btn" onclick={onclose}>Cancel</button>
-    <button class="btn primary" onclick={save}>Done</button>
+    <button class="btn" onclick={onclose}>{t('Cancel')}</button>
+    <button class="btn primary" onclick={save}>{t('Done')}</button>
   {/snippet}
 </Modal>
 

@@ -119,8 +119,8 @@ static int job_sync(void *ctx, const char *what)
 
 static void job_close(void *ctx, bool ok)
 {
+    usb_printer_job_end();      // sends the job's last bytes: a cancel may still need the timer
     esp_timer_stop(s_cancel_timer);
-    usb_printer_job_end();
     s_job_running = false;
     if (!ok && usb_printer_connected()) {
         ESP_LOGW(TAG, "job failed, resetting printer");

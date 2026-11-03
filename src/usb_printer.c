@@ -827,6 +827,11 @@ esp_err_t usb_printer_wait_response(const char *needle, uint32_t timeout_ms)
 
 void usb_printer_job_end(void)
 {
+    // the job's last bytes (end of page, end of job) are still in the
+    // transfer being filled unless the driver synced at the end: send them.
+    // Not after a cancel or a failed transfer (job_check stops the flush).
+    if (s_p.fill && s_p.fill->num_bytes && job_check() == ESP_OK && usb_printer_flush() != ESP_OK)
+        ESP_LOGW(TAG, "the end of the job did not reach the printer");
     if (s_p.fill) {
         usb_transfer_t *x = s_p.fill;
         s_p.fill = NULL;

@@ -10,8 +10,10 @@
 //      the screen is off, a press only turns it on.
 // User button (GPIO5): wired and debounced, but does nothing yet: a free
 //      button for your own feature (on_user_button below).
-// AirPrint: joins the WiFi from .env and serves IPP on port 631; the web UI
-//      is at http://<host>/ (port 80, and 631).
+// WiFi: the network set from the web installer (Improv over the COM port,
+//      improv_esp.h) or from .env.
+// AirPrint: serves IPP on port 631; the web UI is at http://<host>/ (port 80,
+//      and 631).
 // Screen: an optional I2C OLED shows the IP address, the printer and what it
 //      is doing (oled.h); it sleeps when nothing changes, a press wakes it.
 // MODE=debug: also the remote log, crash dumps and firmware updates over
@@ -26,6 +28,7 @@
 #include "freertos/task.h"
 #include "airprint_esp.h"
 #include "debug.h"
+#include "improv_esp.h"
 #include "local_config.h"
 #include "oled.h"
 #include "print_job.h"
@@ -267,8 +270,11 @@ void app_main(void)
     ESP_LOGI(TAG, "ready: press BOOT (or GPIO%d) to scan, twice for a test page", CONFIG_PRINT_BUTTON2_GPIO);
 
     xTaskCreate(ota_confirm_task, "ota_confirm", 3072, NULL, 2, NULL);
-    // AirPrint; the printer keeps working locally if WiFi isn't configured
+    // AirPrint; the servers also start without a network (they answer once the
+    // installer has set one), and the printer keeps working locally
     if (wifi_start(HOSTNAME) == ESP_OK) {
+        if (improv_esp_start() != ESP_OK)
+            ESP_LOGE(TAG, "WiFi setup over USB (Improv) failed to start");
         if (airprint_esp_start(HOSTNAME, on_airprint_job) != ESP_OK)
             ESP_LOGE(TAG, "AirPrint failed to start");
         if (debug)

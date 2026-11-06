@@ -12,6 +12,7 @@
 #include "airprint.h"
 #include "canon_bjl.h"
 #include "debug.h"
+#include "improv_esp.h"
 #include "esp_eth.h"
 #include "esp_event.h"
 #include "esp_heap_caps.h"
@@ -30,9 +31,10 @@
 #include "webui.h"
 
 // No PSRAM in QEMU: a small buffer in internal RAM (a bigger one starves the
-// network during the 600 dpi print test). Streams wrap it many times; a kept
-// scan does not fit and must fail cleanly.
-#define SCAN_BUF_SIZE (48 * 1024)
+// network during the 600 dpi print test, or with 48 KB and the Improv task
+// and UART driver, the 300 dpi scan stream: "no mem for receive buffer").
+// Streams wrap it many times; a kept scan does not fit and must fail cleanly.
+#define SCAN_BUF_SIZE (40 * 1024)
 
 static const char *TAG = "selftest";
 
@@ -133,6 +135,9 @@ static void ota_confirm_task(void *arg)
 void app_main(void)
 {
     debug_log_start(16 * 1024);
+    // the installer's WiFi setup on the console UART (no WiFi here: the device
+    // info and the state answer, a scan or a network fails cleanly)
+    improv_esp_start();
     xTaskCreate(ota_confirm_task, "ota_confirm", 3072, NULL, 2, NULL);
     oled_start("qemu");     // no display on the emulated I2C bus: must just say so
     const printer_driver_t *drv = print_job_driver();

@@ -1,0 +1,84 @@
+# The web installer (flasher/): builds the firmware in each MODE, packs it
+# with esp-web-tools into a static site and publishes it on GitHub Pages
+# (Settings -> Pages -> Source: GitHub Actions). Pull requests only build it
+# (the site is attached to the run as an artifact).
+name: Web installer
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            web/package-lock.json
+            flasher/package-lock.json
+
+      - uses: actions/cache@v4
+        with:
+          path: ~/.platformio
+          key: platformio-${{ runner.os }}-${{ hashFiles('platformio.ini') }}
+
+      - name: Install PlatformIO and the installer's packages
+        run: |
+          pip install platformio
+          (cd flasher && npm ci)
+
+      - name: WiFi setup (Improv) tests
+        run: |
+          make -C host -s improv_host
+          host/improv_host selftest
+          (cd flasher && npm test)
+
+      - name: Build the firmware and the site
+        run: |
+          base=$(sed -n 's/^set(PROJECT_VER "\(.*\)")$/\1/p' CMakeLists.txt)
+          for mode in normal debug; do
+            # the version tells the installer whether a board is up to date
+            version="$base-${GITHUB_SHA::7}"
+            [ "$mode" = normal ] || version="$version-$mode"
+            printf 'MODE=%s\n' "$mode" > .env
+            rm -rf .pio/build/esp32s3      # PROJECT_VER is read when CMake configures
+            FIRMWARE_VERSION="$version" pio run -e esp32s3
+            label=$([ "$mode" = normal ] && echo "Standard" || echo "Debug (updates over WiFi)")
+            python3 tools/gen_flasher.py site "$mode" --label "$label" | tee /dev/stderr | grep -qF " $version "
+          done
+          ls -lR site
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+  deploy:
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/master'
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    concurrency:
+      group: pages
+      cancel-in-progress: false
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

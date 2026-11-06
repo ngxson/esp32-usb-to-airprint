@@ -1,0 +1,13 @@
+{
+  "name": "esp32-usb-to-airprint-flasher",
+  "private": true,
+  "type": "module",
+  "description": "The web installer: flashes the firmware from the browser (esp-web-tools) and sets the WiFi up over Improv",
+  "scripts": {
+    "test": "node --test tests/*.test.mjs"
+  },
+  "devDependencies": {
+    "esp-web-tools": "10.4.0",
+    "improv-wifi-serial-sdk": "2.8.0"
+  }
+}

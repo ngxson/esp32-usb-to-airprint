@@ -11,6 +11,8 @@
 #     images refused, an update rebooted before it confirmed itself rolled
 #     back by the bootloader, an update that confirms itself kept (with
 #     tools/remote.py); a crash: core dump, summary, decoded by remote.py
+#  5. the web installer's WiFi setup (Improv) on the console UART: the device
+#     info, a scan and a network refused cleanly (QEMU has no WiFi)
 #
 #   QEMU_XTENSA=/path/to/qemu-system-xtensa [QEMU_LIB_PATH=dir:dir] tools/qemu_selftest.sh
 #
@@ -20,7 +22,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 QEMU=${QEMU_XTENSA:-qemu-system-xtensa}
-PY=~/.platformio/penv/bin/python
+PY=${PIO_PYTHON:-$HOME/.platformio/penv/bin/python}
 ESPTOOL=~/.platformio/packages/tool-esptoolpy/esptool.py
 B=.pio/build/qemu
 OUT=$(mktemp -d)
@@ -33,10 +35,14 @@ $PY $ESPTOOL --chip esp32s3 merge_bin --fill-flash-size 16MB -o "$OUT/flash.bin"
     --flash_mode dio --flash_freq 80m --flash_size 16MB \
     0x0 $B/bootloader.bin 0x8000 $B/partitions.bin $APP_OFS $B/firmware.bin >/dev/null
 
-# emulated Ethernet; host ports 18631, 18000, 18080, 12323 -> ESP32 631 (IPP), 80 (web), 8080 (debug), 2323 (log)
+# emulated Ethernet; host ports 18631, 18000, 18080, 12323 -> ESP32 631 (IPP), 80 (web), 8080 (debug), 2323 (log).
+# The console: QEMU waits on port 18555 for qemu_console.py, which logs it to
+# serial.log and lets tools/improv.py talk to the board on port 18556.
 ( DYLD_FALLBACK_LIBRARY_PATH=${QEMU_LIB_PATH:-} "$QEMU" -nographic -machine esp32s3 -drive file="$OUT/flash.bin",if=mtd,format=raw \
     -nic user,model=open_eth,hostfwd=tcp::18631-:631,hostfwd=tcp::18080-:8080,hostfwd=tcp::12323-:2323,hostfwd=tcp::18000-:80 \
-    -serial file:"$OUT/serial.log" -monitor none & echo $! > "$OUT/pid"; wait ) &
+    -chardev socket,id=con,host=127.0.0.1,port=18555,server=on,wait=on -serial chardev:con \
+    -monitor none & echo $! > "$OUT/pid"; wait ) &
+python3 tools/qemu_console.py 18555 "$OUT/serial.log" 18556 &
 sleep 1
 for i in $(seq 1 1800); do
     sleep 1
@@ -68,7 +74,7 @@ if grep -q "QEMU_SELFTEST ipp ready" "$OUT/serial.log"; then
         ipptool -t -f "$OUT/$doc" -d filetype=image/urf ipp://localhost:18632/ipp/print print-job.test >/dev/null 2>&1 || true
         n=$((n + 1))
         # the job just printed is the last one the ESP32 logged
-        dev=$(grep "QEMU_JOB" "$OUT/serial.log" | tail -1 | sed -E 's/.*crc32=([0-9a-f]+).*/\1/')
+        dev=$(grep -a "QEMU_JOB" "$OUT/serial.log" | tail -1 | sed -E 's/.*crc32=([0-9a-f]+).*/\1/')
         host=$(python3 -c "import zlib,sys; print('%08x' % zlib.crc32(open(sys.argv[1],'rb').read()))" "$OUT/host/out/job-$n.prn")
         if [ -n "$dev" ] && [ "$dev" = "$host" ]; then
             echo "MATCH print $doc: esp32s3 $dev == host $host ($(grep -oE 'PASS|FAIL' "$OUT/esp.log"))"
@@ -77,7 +83,7 @@ if grep -q "QEMU_SELFTEST ipp ready" "$OUT/serial.log"; then
         fi
     done
     kill $HOSTSRV 2>/dev/null || true
-    grep "QEMU_JOB" "$OUT/serial.log" | tail -2 | sed -E 's/.*(bytes=.*)/  esp32s3 job: \1/'
+    grep -a "QEMU_JOB" "$OUT/serial.log" | tail -2 | sed -E 's/.*(bytes=.*)/  esp32s3 job: \1/'
 
     # --- the web UI on port 80, its live state and event stream
     W=http://localhost:18000
@@ -114,19 +120,19 @@ if grep -q "QEMU_SELFTEST ipp ready" "$OUT/serial.log"; then
     same "scan stream 150 dpi A4" "$OUT/esp150.jpg" "$OUT/ref150.jpg"
     curl -s -m 1800 -o "$OUT/esp300.jpg" "$S/stream.jpg?dpi=300&paper=letter" || true
     same "scan stream 300 dpi Letter (ring wraps)" "$OUT/esp300.jpg" "$OUT/ref300.jpg"
-    # the 48 KB buffer cannot hold a kept scan: it must fail cleanly
+    # the 40 KB buffer cannot hold a kept scan: it must fail cleanly
     curl -s -m 10 -X POST "$S/last?paper=a4" >/dev/null || true
     for i in $(seq 1 900); do
         curl -s -m 10 "$S/status" | grep -q '"state":"scanning"' || break
         sleep 1
     done
     if curl -s -m 10 "$S/status" | grep -q "does not fit"; then
-        echo "MATCH scan kept 150 dpi: refused cleanly (does not fit in the 48 KB buffer)"
+        echo "MATCH scan kept 150 dpi: refused cleanly (does not fit in the 40 KB buffer)"
     else
         echo "MISMATCH scan kept 150 dpi: $(curl -s -m 10 "$S/status")"; status=1
     fi
-    grep "QEMU_SCAN" "$OUT/serial.log" | sed -E 's/.*QEMU_SCAN /  esp32s3 scan: /'
-    if grep "QEMU_SCAN" "$OUT/serial.log" | grep -vq "violations=0 "; then
+    grep -a "QEMU_SCAN" "$OUT/serial.log" | sed -E 's/.*QEMU_SCAN /  esp32s3 scan: /'
+    if grep -a "QEMU_SCAN" "$OUT/serial.log" | grep -vq "violations=0 "; then
         echo "emulated scanner saw protocol violations"; status=1
     fi
 
@@ -144,6 +150,14 @@ if grep -q "QEMU_SELFTEST ipp ready" "$OUT/serial.log"; then
     check "debug /info partition" "$(field partition) $(field ota_state)" "ota_0 valid"
     check "status screen without a display: disabled, no task" \
         "$(grep -aq 'oled: no display at 0x3c.*screen disabled' "$OUT/serial.log" && echo reported) $(curl -s -m 10 $D/info | awk '$1 == "oled"' | wc -l | tr -d ' ')" "reported 0"
+    # the installer's WiFi setup on the console (the log goes by on the same port)
+    check "WiFi setup over the console (Improv)" \
+        "$(python3 tools/improv.py tcp:localhost:18556 info | awk 'NR == 1 {print $2, $3, $4, $5} /^state/ {print $2}' | tr '\n' ' ')" \
+        "ESP32 USB to AirPrint ready "
+    check "Improv scan and network without WiFi" \
+        "$(python3 tools/improv.py tcp:localhost:18556 scan 2>&1; IMPROV_PASSWORD=x python3 tools/improv.py tcp:localhost:18556 wifi Net 2>&1)" \
+        "scan failed: unknown error
+failed: unable to connect"
     # (the 16 KB ring has long dropped the boot; the scans' last lines are recent)
     check "debug /log has the scans" "$(curl -s -m 10 $D/log | grep -ac 'QEMU_SCAN')" 3
     check "debug live log (port 2323)" "$(nc -w 3 localhost 12323 | grep -ac 'QEMU_SCAN')" 3
@@ -179,7 +193,7 @@ fi
 kill "$(cat "$OUT/pid")" 2>/dev/null || true
 wait 2>/dev/null || true
 
-grep -E "QEMU_SELFTEST mode|Guru|abort\(\)|panic|stack overflow" "$OUT/serial.log" | sed 's/\x1b\[[0-9;]*m//g'
+grep -aE "QEMU_SELFTEST mode|Guru|abort\(\)|panic|stack overflow" "$OUT/serial.log" | sed 's/\x1b\[[0-9;]*m//g'
 
 for dpi in 300 600; do
     host=$(host/bjl_host testpage $dpi "$OUT/host$dpi.prn" | sed -E 's/.*crc32 ([0-9a-f]+).*/\1/')

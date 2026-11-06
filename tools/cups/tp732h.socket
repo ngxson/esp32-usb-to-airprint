@@ -1,0 +1,13 @@
+[Unit]
+Description=TP732H label printer: raw print data on port 9100
+# up while the printer is on (70-tp732h.rules): when it is off, CUPS's
+# socket backend gets "connection refused" and keeps the job until it is back
+BindsTo=dev-tp732h.device
+After=dev-tp732h.device
+
+[Socket]
+ListenStream=9100
+Accept=yes
+MaxConnections=1
+IPAddressDeny=any
+IPAddressAllow=localhost 10.0.0.0/8 172.16.0.0/12 192.168.0.0/16

@@ -41,6 +41,7 @@ components/printers/    portable C: the printer drivers
   printers.c            the list of drivers, printer_driver_find(), printer_driver_match()
   canon_pixma.c         Canon MG2500 and 22 related series: canon_bjl + bjl_render, test
                         page, IVEC status
+  tp_label.c            Grozziie TP732H 80 mm thermal label printer (its Windows driver's stream)
 components/scanner/     portable C (pthreads)
   pixma_scan.c          MG2500 scan protocol (from SANE's pixma backend)
   jpeg_enc.c            baseline JPEG encoder fed line by line (integer only)
@@ -81,12 +82,16 @@ host/                   native builds of the portable code (make -C host)
                         SIGUSR1 = the button, GET /dev/oled.pbm = the screen
   scan_host             scanner protocol tests, JPEG output for check_jpeg.py
   oled_host             screen drawing tests, every screen -> out/oled-*.pbm
+  rastertoprinter       CUPS filter (cups_filter.c): CUPS raster v3 / PWG / URF -> a driver's
+                        printer data, for printers without a board (tools/cups/)
 tools/
   run_tests.sh          all host checks (optional parts via env vars, see below)
   qemu_selftest.sh      the firmware on emulated ESP32-S3: IPP, prints, scans, OTA, crash
   remote.py             MODE=debug board over WiFi: info, log, upload, reboot, crash, panic, level
   ota_target.py         PlatformIO targets: pio run -t ota / -t logs
   bjl_decode.py         decodes a printer stream, validates it, renders PNGs
+  tp732h_decode.py      the same for the TP732H label printer
+  cups/                 TP732H through Linux CUPS: PPD, udev rule and socket units, README
   raster_to_png.py      shows a URF / PWG document as a PNG
   check_jpeg.py         strict JPEG decode (djpeg), size, dpi, PSNR against a reference
   compare_gutenprint.py byte-for-byte comparison against Gutenprint
@@ -98,7 +103,8 @@ tools/
   gen_icon.py           printer icon -> components/airprint/icon_png.h
   oled_preview.py       out/oled-*.pbm -> out/oled.png (all screens on one sheet)
   gen_sd_pinout.py      docs/sd_card_pinout.png (SD card idea, parked)
-  testdata/             PPD for cupsfilter, ipptool cancel test
+  testdata/             PPD for cupsfilter, ipptool cancel test; tp732h/: streams captured
+                        from the TP732H's Windows driver, an A6 label PDF
 sdkconfig.defaults      all ESP-IDF settings
 sdkconfig.defaults.qemu added for the qemu env only (DIO flash)
 partitions.csv          nvs, otadata, phy_init, ota_0, ota_1 (4 MB each), coredump (128 KB)
@@ -128,12 +134,14 @@ QEMU_XTENSA=/path/qemu-system-xtensa QEMU_LIB_PATH=/opt/homebrew/lib tools/qemu_
 cd web && npm run dev               # the web UI with live reload, against host/airprint_host on 8631
                                     # (DEVICE=http://<board-ip> npm run dev: against the board)
 cd web && npm run check             # svelte-check (types)
+make -C host rastertoprinter CFLAGS=-O2   # the CUPS filter for a server (tools/cups/README.md)
 ```
 
 The npm registry configured on this Mac does not answer; install with `npm install --registry=https://registry.npmjs.org/`. `typescript` stays at 6.x: `svelte-check` 4.7 refuses 7.
 
 What the host tests cover:
-- `bjl_host selftest`: encoder unit tests; every driver's test page against the direct `canon_bjl` one; the choice of driver for a device (`printer_driver_match`: USB ids, model names with and without " series", other makers); test page streams decoded by `bjl_decode.py`.
+- `bjl_host selftest`: encoder unit tests; every Canon driver's test page against the direct `canon_bjl` one; the choice of driver for a device (`printer_driver_match`: USB ids, model names with and without " series", other makers); test page streams decoded by `bjl_decode.py`.
+- `bjl_host tp732h-check`: each capture in `tools/testdata/tp732h/` decoded, its pixels printed again through the TP732H driver (with 100 white rows below, which it must drop) must give the same bytes. Then, with `cupsfilter` installed, `label-a6.pdf` through CUPS's chain and `rastertoprinter`, decoded by `tp732h_decode.py` (`host/out/tp-label.png`).
 - `GUTENPRINT=1`: our encoder fed Gutenprint's ink planes must reproduce Gutenprint's stream byte for byte: the MG2500 at 300 and 600 dpi, Letter, 2 pages, and the same four for one Gutenprint model of each other stream variant (`compare_gutenprint.py --model`).
 - `scan_host selftest`: the pixma protocol against `fake_scanner` at 75-600 dpi and odd areas (x not a multiple of 32, a 6 px strip at the right edge), busy retries, a consumer stopping the scan, a cancel during warm-up, a scanner error mid-image, invalid parameters. Every delivered line is compared pixel by pixel with the test page; the fake flags any protocol violation, unread reply or unclosed session. JPEG encoder: odd sizes, padding, early finish.
 - `scan_host scan`: whole pipeline to JPEG for A4/Letter at 150-600 dpi, checked by `check_jpeg.py` (djpeg strict decode, size, dpi, PSNR >= 38 dB).
@@ -188,6 +196,7 @@ port status 0x18 (selected, no error)
 - `airprint.c` takes everything printer-specific from `airprint_config_t.driver`: IPP media, margins, resolutions, colour attributes, the URF string (`printer_driver_urf`, also in the mDNS TXT record), the paper of a job (`printer_driver_paper_for`: the driver's paper closest in height to the first page), the conversion. The host server picks the driver with `PRINTER_DRIVER=<id>`.
 - Choice of driver on the board (`print_job_driver()`): when a printer is plugged in, `printer_driver_match` looks for a driver with its USB VID:PID, then one with its IEEE 1284 MFG and MDL (case and a " series" suffix ignored); that driver stays until another printer is plugged in (a printer switched off keeps it). Before any printer, and for an unknown one (logged), `CONFIG_PRINTER_DRIVER`. When the driver changes after startup, `airprint_esp_driver_changed()` updates the IPP make and model and device id, the eSCL make and model and the mDNS records (removed and announced again, so `Scan=T` and `_uscan` follow the new model). Printer-only models without a known USB id (iP2700, iP2800, P200) are matched by name only; their MDL strings are inferred from Canon's naming, not seen.
 - Still Canon-specific outside the driver: `usb_printer.c` reassembles back-channel replies as IVEC XML (`</cmd>`) and fills `state`, `detail`, `data` from `GetStatusResponse`; the scanner is Canon's pixma protocol; the web UI's print dialog has A4/Letter at 300/600 dpi with canon_bjl's printable area (`web/src/lib/layout.ts`).
+- The TP732H (`tp_label.c`, below) is the one non-Canon driver: gray only, 203 dpi, one 80 x 130 mm label, no test page, no status.
 - Adding one: a Canon model whose stream is one of the `canon_bjl` variants is a `CANON_PIXMA(...)` line in `canon_pixma.c` plus its entry in `printers.c`. Another printer: a new source file in `components/printers/`, listed in `printers.c`, `components/printers/CMakeLists.txt` and `PRINTERS` in `host/Makefile`. Try it with `PRINTER_DRIVER=<id> host/airprint_host` (jobs land in `host/out/job-N.prn`); set `.scanner = false` unless the device is a Canon pixma scanner. The board picks it by USB id or model name; `CONFIG_PRINTER_DRIVER` in `sdkconfig.defaults` only sets the default.
 - `bjl_host selftest` checks that every Canon driver's test page is byte-identical to the direct `canon_bjl` test page of its model at every resolution; the reference CRCs below go through the driver on the host (AirPrint prints) and in QEMU (dry runs and prints, `canon-mg2500`, the default with no printer).
 
@@ -214,6 +223,21 @@ port status 0x18 (selected, no error)
   Only the MG2500 was tried on paper. Whether the older ones (iP2700 variant, 2010) answer the IVEC status requests is unknown. Next candidates (2-bit black at 600 dpi, otherwise header bytes): MX370/430, MX390/450, MX470, MX510, MX520, MX530, E500, E510, E560, E600, E610, MG3500.
 - Back channel: when read, the printer answers with about 1 KB of `GetStatusResponse` XML (status, `status_detail` such as `MarkerSupplyAttention`, Canon fields such as `CIR:CL=000,BK=UK` for ink), e.g. `idle (MarkerSupplyAttention) BST:04;...;CTK:CL,LOW,/,BK,SETZ; CIR:CL=000,BK=UK;...`. Poll it at most every 2 s when idle and every 250 ms during a job, and reassemble replies from the 512-byte reads. Like Canon's driver, we wait up to 5 s for the `StartJob`/`ModeShift` replies and up to 180 s for `EndJob` (the page is done), and carry on if a reply never comes.
 - Cancel: stop at a line boundary, finish the page (eject) and end the job. If the printer stops accepting data, after 8 s abort the transfer and send the printer-class SOFT_RESET.
+
+## Grozziie TP732H label printer
+
+A Grozziie 80 mm thermal label printer (die-cut A6 labels, 80 x 130 mm printed), added by a contributor who could only print from a Windows VM: its only driver is for Windows (delivered through a separate finder/installer program), none for macOS or iOS. Its Windows driver: SangYi/ANKUI `tp518w201.inf`, Unidrv with the `OEM640dots` render plugin; every GPD command is empty, the plugin builds the whole stream.
+
+- USB `4c4a:c200`, composite: interface 0 mass storage (likely the driver CD), interface 1 printer class. No IEEE 1284 Device ID (Windows: "UnknownPrinter"). Whether it answers on a back channel is unknown.
+- How the stream was found: a second Windows queue on the same driver with a Standard TCP/IP port to `nc -l -p 9100` on another machine, printed from PowerShell with `System.Drawing.Printing` (known shapes, then run-length edge cases and two pages), with the real queue's DEVMODE copied in. A local file port did not work (jobs stuck in "Error"), and Ghostscript's `mswinpr2` hung when run through the QEMU guest agent.
+- Stream, per page (each page repeats everything): 50 zero bytes; `@SMS 02 d5 \r\n`, `@S~~E`, `@SGS 02 \r\n`, `@STPZ\n` + 14 bytes (`14`x6 `5a 64` `50`x6, likely the density for the driver's 6 speed modes) + `\r\n`, `@SPP 00`; then `@<`, u32 big-endian N, u16 little-endian row count; per row `#<` runs `#>`; `@>\r\n`. N = the bytes from after the row count to the end of `@>\r\n`, minus 92 (checked on 4 pages; the 92 is unexplained). The settings are the driver's defaults as sent; their meaning is not decoded.
+- Rows: 640 dots (80 mm at 203 dpi). Runs: `0x80 | level, n` = n + 1 dots (2..256), a single dot is the level byte alone; longer runs are split into 256s. Levels: 0 white, 1 black, 2 black with white directly above it (true for every dot of the captures; probably more heat for a cold dot).
+- The driver sends a page down to its last black row plus 24 white rows, not the label's full length; the printer finds the next label gap itself (seen on paper). Gray: the driver dithers (50 % is a checkerboard); ours uses an 8x8 ordered dither, which keeps 0 and 255 exact.
+- On paper (2026-11-06, through CUPS): placement right (80 x 130 mm centred on the A6 label), the 10-step gray scale distinct, stops at the label gap. The printer prints while it receives: a page sent at 8 KB/s, slower than it prints the dense rows, came out garbled from that point, then fed two labels with dashes, and every later job came out as blank labels until the printer was switched off and on. So pages must arrive at full speed (the driver and the filter write a page in one go). Labels printed before that restart also lost small bits (tops of letters, pieces of thin lines), as the contributor had seen with the Windows driver; after the restart the same data printed clean with the driver's mixed levels, all level 1 and all level 2 (level 2 slightly darker). If labels lose details or come out blank, switch the printer off and on.
+- Our driver keeps the page as a 1-bit bitmap (80 bytes per row, 83 KB for a label) and encodes it twice at `page_end`: once to count the bytes for N, once to send them. The encoded rows themselves are about 10 bytes each for text but up to 644 for dense dithering (670 KB for a gray label), more than the PSRAM left beside the shared buffer (about 570 KB). A cancelled page prints nothing.
+- On the board: the printer stalls GET_DEVICE_ID and GET_PORT_STATUS (so no paper status; `usb_printer.c` stops asking after the first stall, which the USB host stack logs as an error each time). The driver flushes the USB buffers at the end of each page (`sync(ctx, NULL)`): otherwise a page's last partial 16 KB buffer would wait for the next page or the job's end, and the printer would garble the page. iOS renders at 203 dpi for `RS203` and the `om_label_80x130mm` medium.
+- Without a board, verified on paper the same way: CUPS (queue with `tools/cups/tp732h.ppd`, `print-scaling-default=fit`) -> `socket://<host>:9100` -> the printer's host (`tools/cups/` udev rule and socket units) -> USB. Gotcha: gstoraster writes PWG raster only when `FINAL_CONTENT_TYPE` contains "pwg"; for a PPD queue it writes CUPS raster v3 (`3SaR`, little-endian, uncompressed), so the filter reads that format itself. `cupsfilter -m printer/foo` did not reach the PPD's filter (it chose PostScript): test with a real queue sending to `nc`.
+- On a board (2026-11-06): prints from an iPhone and from `ipptool` verified on paper.
 
 ## Scanner protocol (MG2500 series)
 

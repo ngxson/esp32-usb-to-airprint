@@ -1,0 +1,7 @@
+[Unit]
+Description=TP732H label printer job from %I
+
+[Service]
+StandardInput=socket
+StandardOutput=journal
+ExecStart=/bin/sh -c 'exec cat > /dev/tp732h'

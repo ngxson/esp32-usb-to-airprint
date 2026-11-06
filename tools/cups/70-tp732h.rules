@@ -1,0 +1,3 @@
+# TP732H label printer (USB 4c4a:c200) on the Linux host it is plugged into:
+# a stable name, and tp732h.socket only while the printer is on.
+SUBSYSTEM=="usbmisc", KERNEL=="lp[0-9]*", ATTRS{idVendor}=="4c4a", ATTRS{idProduct}=="c200", SYMLINK+="tp732h", TAG+="systemd", ENV{SYSTEMD_WANTS}+="tp732h.socket"

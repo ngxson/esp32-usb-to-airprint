@@ -64,6 +64,7 @@ typedef struct {
     atomic_int out_inflight;            // OUT transfers submitted, not completed
     volatile bool in_inflight;
     bool in_stopped;                    // IN endpoint failed, stop polling
+    bool no_port_status;                // GET_PORT_STATUS stalled: not asked again (TP732H)
     TickType_t in_last;                 // when the last IN read completed
     volatile bool ctrl_done;
     SemaphoreHandle_t ctrl_sem;
@@ -257,6 +258,8 @@ static esp_err_t ctrl_request(uint8_t bmRequestType, uint8_t bRequest, uint16_t 
         }
         if (!s_p.ctrl_done)
             err = ESP_ERR_TIMEOUT;
+        else if (s_p.ctrl->status == USB_TRANSFER_STATUS_STALL)
+            err = ESP_ERR_NOT_SUPPORTED;    // the device refuses this request
         else if (s_p.ctrl->status != USB_TRANSFER_STATUS_COMPLETED)
             err = ESP_FAIL;
     }
@@ -516,6 +519,7 @@ static void open_device(uint8_t addr)
             ESP_LOGW(TAG, "SET_INTERFACE alt %d failed", s_p.alt);
     }
 
+    s_p.no_port_status = false;
     // IEEE 1284 Device ID: 2-byte big-endian length (including itself) + text
     static uint8_t idbuf[1024];
     size_t got = 0;
@@ -538,9 +542,6 @@ static void open_device(uint8_t addr)
     if (usb_printer_port_status(&st) == ESP_OK)
         ESP_LOGI(TAG, "port status 0x%02x (%s%s%s)", st, (st & 0x20) ? "paper empty " : "",
                  (st & 0x10) ? "selected " : "", (st & 0x08) ? "no error" : "ERROR");
-
-    if (info.vid != CANON_VID)
-        ESP_LOGW(TAG, "not a Canon printer: Canon raster jobs will print garbage on it");
 
     xSemaphoreTake(s_p.lock, portMAX_DELAY);
     s_p.info = info;
@@ -857,11 +858,19 @@ esp_err_t usb_printer_soft_reset(void)
     return ctrl_request(req, PRN_REQ_SOFT_RESET, 0, s_p.intf, 0, NULL, NULL);
 }
 
+// A printer that stalls the request (the TP732H) is not asked again until it
+// is plugged in again: every stall is logged by the USB host stack.
 esp_err_t usb_printer_port_status(uint8_t *status)
 {
+    if (s_p.no_port_status)
+        return ESP_ERR_NOT_SUPPORTED;
     uint8_t req = USB_BM_REQUEST_TYPE_DIR_IN | USB_BM_REQUEST_TYPE_TYPE_CLASS | USB_BM_REQUEST_TYPE_RECIP_INTERFACE;
     size_t got = 0;
     esp_err_t err = ctrl_request(req, PRN_REQ_GET_PORT_STATUS, 0, s_p.intf, 1, status, &got);
+    if (err == ESP_ERR_NOT_SUPPORTED) {
+        s_p.no_port_status = true;
+        ESP_LOGW(TAG, "GET_PORT_STATUS not supported: no paper status from this printer");
+    }
     return (err == ESP_OK && got != 1) ? ESP_FAIL : err;
 }
 

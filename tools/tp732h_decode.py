@@ -5,6 +5,7 @@ checks its framing and writes each page as a PNG (level-2 dots dark gray).
     tools/tp732h_decode.py job.prn [--png out.png]   (out-1.png, out-2.png... for more pages)
 """
 import argparse
+import os
 import struct
 import sys
 
@@ -55,7 +56,8 @@ def main():
         print(f'page {n}: {len(rows)} rows ({len(rows) / 8:.1f} mm), {black} black dots')
         if a.png:
             img = Image.frombytes('L', (640, len(rows)), b''.join(rows).translate(bytes([255, 0, 90]) + bytes(253)))
-            out = a.png if len(all_pages) == 1 else a.png.replace('.png', f'-{n}.png')
+            base, ext = os.path.splitext(a.png)
+            out = a.png if len(all_pages) == 1 else f'{base}-{n}{ext}'
             img.save(out)
     return 0
 

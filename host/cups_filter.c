@@ -91,7 +91,8 @@ static int on_page_begin(void *user, const raster_page_t *pg)
                 f->d->resolutions[f->d->nresolutions - 1]);
         return f->failed = true;
     }
-    if (!f->job && !(f->job = f->d->job_begin(f->d, &f->io, pg->dpi, 0))) {
+    int paper = printer_driver_paper_for(f->d, pg->height, pg->dpi);
+    if (!f->job && !(f->job = f->d->job_begin(f->d, &f->io, pg->dpi, paper))) {
         fprintf(stderr, "ERROR: out of memory\n");
         return f->failed = true;
     }

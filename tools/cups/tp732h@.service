@@ -4,4 +4,6 @@ Description=TP732H label printer job from %I
 [Service]
 StandardInput=socket
 StandardOutput=journal
-ExecStart=/bin/sh -c 'exec cat > /dev/tp732h'
+# the device check: if the printer just went away, `>` would create a regular
+# file in /dev that swallows every later job
+ExecStart=/bin/sh -c '[ -c /dev/tp732h ] && exec cat > /dev/tp732h'

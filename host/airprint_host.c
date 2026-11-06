@@ -59,7 +59,7 @@ static int job_write(void *ctx, const uint8_t *data, size_t len)
 
 static int job_sync(void *ctx, const char *what)
 {
-    fprintf(stderr, "host: sync %s\n", what);
+    fprintf(stderr, "host: sync %s\n", what ? what : "(flush)");
     return 0;
 }
 

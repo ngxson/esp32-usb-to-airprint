@@ -57,6 +57,18 @@ for dpi in 300 600; do
     python3 tools/bjl_decode.py $OUT/testpage$dpi.prn --png $OUT/testpage$dpi.png --quiet | tail -6
 done
 
+echo "== TP732H label printer (components/printers/tp_label.c)"
+host/bjl_host tp732h-check tools/testdata/tp732h/*.prn
+if command -v cupsfilter >/dev/null; then
+    # CUPS's own chain (PDF -> CUPS raster, fit to the label) into the filter
+    cupsfilter -p tools/cups/tp732h.ppd -m application/vnd.cups-raster -o print-scaling=fit \
+        tools/testdata/tp732h/label-a6.pdf > $OUT/tp-label.ras 2>/dev/null
+    host/rastertoprinter 1 test label 1 "" $OUT/tp-label.ras > $OUT/tp-label.prn 2>/dev/null
+    python3 tools/tp732h_decode.py $OUT/tp-label.prn --png $OUT/tp-label.png
+else
+    echo "skipped the CUPS filter: no cupsfilter"
+fi
+
 if [ -n "${GUTENPRINT:-}" ]; then
     echo "== comparison with Gutenprint's MG2500 driver"
     [ -f tools/gutenprint_ref/build/ref600.prn ] || tools/gutenprint_ref/build_ref.sh

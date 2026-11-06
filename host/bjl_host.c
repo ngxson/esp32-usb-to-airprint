@@ -7,6 +7,9 @@
 //                                           for a model of canon_bjl.h (default MG2400)
 //   bjl_host selftest                       PackBits / framing unit tests, and the
 //                                           printer drivers' test pages against testpage
+//   bjl_host tp732h-check capture.prn...    the TP732H driver against streams captured
+//                                           from its Windows driver (tools/testdata/tp732h)
+#define _GNU_SOURCE     // memmem
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -195,6 +198,106 @@ static int fail_sink(void *user, const uint8_t *data, size_t len)
     return *budget < 0 ? -5 : 0;
 }
 
+// --- TP732H label printer (components/printers/tp_label.c) ------------------
+
+// One page of a TP732H stream (format in tp_label.c) into 0/1 pixels, 640 per
+// row. Returns the bytes it used, 0 if malformed.
+static size_t tp_decode_page(const uint8_t *s, size_t n, uint8_t **pixels, int *rows)
+{
+    size_t i = 0;
+    while (i < n && s[i] == 0)
+        i++;
+    const uint8_t *start = memmem(s + i, n - i, "@SPP\0@<", 7);
+    if (i != 50 || !start)
+        return 0;
+    i = start - s + 7;
+    if (i + 6 > n)
+        return 0;
+    uint32_t len = (uint32_t)s[i] << 24 | s[i + 1] << 16 | s[i + 2] << 8 | s[i + 3];
+    *rows = s[i + 4] | s[i + 5] << 8;
+    i += 6;
+    size_t data = i;
+    *pixels = calloc((size_t)*rows * 640, 1);
+    for (int y = 0; y < *rows; y++) {
+        if (i + 2 > n || memcmp(s + i, "#<", 2))
+            return 0;
+        i += 2;
+        int x = 0;
+        while (i + 2 <= n && memcmp(s + i, "#>", 2)) {
+            int level = s[i] & 0x7f, count = s[i] & 0x80 ? s[i + 1] + 1 : 1;
+            if (level > 2 || x + count > 640)
+                return 0;
+            memset(*pixels + (size_t)y * 640 + x, level != 0, count);
+            x += count;
+            i += s[i] & 0x80 ? 2 : 1;
+        }
+        if (x != 640 || i + 2 > n)
+            return 0;
+        i += 2;
+    }
+    if (i + 4 > n || memcmp(s + i, "@>\r\n", 4) || i + 4 - data - 92 != len)
+        return 0;
+    return i + 4;
+}
+
+// Each file is a stream captured from the Windows driver: its pixels, printed
+// through our driver (with white rows below them, which it must drop), must
+// give the same bytes.
+static int cmd_tp_check(int nfiles, char **files)
+{
+    const printer_driver_t *d = printer_driver_find("tp732h");
+    CHECK(d, "tp732h driver");
+    for (int f = 0; d && f < nfiles; f++) {
+        FILE *in = fopen(files[f], "rb");
+        CHECK(in, "%s: cannot open", files[f]);
+        if (!in)
+            continue;
+        mem_t want = {0}, got = {0};
+        uint8_t chunk[4096];
+        size_t r;
+        while ((r = fread(chunk, 1, sizeof(chunk), in)) > 0)
+            mem_sink(&want, chunk, r);
+        fclose(in);
+
+        printer_io_t io = {.write = mem_sink, .ctx = &got};
+        void *job = d->job_begin(d, &io, 203, 0);
+        int pages = 0;
+        for (size_t at = 0; at < want.len;) {
+            uint8_t *px = NULL;
+            int rows = 0;
+            size_t used = tp_decode_page(want.buf + at, want.len - at, &px, &rows);
+            CHECK(used, "%s: page %d does not decode", files[f], pages + 1);
+            if (!used) {
+                free(px);
+                break;
+            }
+            uint8_t line[640];
+            d->page_begin(job, 640, rows + 100, 1);
+            for (int y = 0; y < rows + 100; y++) {
+                bool white = y >= rows || !memchr(px + (size_t)y * 640, 1, 640);
+                for (int x = 0; !white && x < 640; x++)
+                    line[x] = px[(size_t)y * 640 + x] ? 0 : 255;
+                d->page_line(job, y, white ? NULL : line);
+            }
+            d->page_end(job);
+            free(px);
+            at += used;
+            pages++;
+        }
+        CHECK(d->job_end(job) == 0, "%s: job failed", files[f]);
+        size_t k = 0;
+        while (k < got.len && k < want.len && got.buf[k] == want.buf[k])
+            k++;
+        bool same = got.len == want.len && k == want.len;
+        CHECK(same, "%s: %zu bytes, expected %zu (first difference at %zu)", files[f], got.len, want.len, k);
+        if (same)
+            printf("%s: %d page(s), %zu bytes, identical\n", files[f], pages, got.len);
+        free(want.buf);
+        free(got.buf);
+    }
+    return failures != 0;
+}
+
 static int cmd_selftest(void)
 {
     uint8_t buf[2000];
@@ -283,6 +386,8 @@ static int cmd_selftest(void)
     CHECK(printer_driver_find("canon-mg2500"), "canon-mg2500 driver");
     for (int k = 0; printer_drivers[k]; k++) {
         const printer_driver_t *d = printer_drivers[k];
+        if (strncmp(d->id, "canon-", 6))
+            continue;
         CHECK(d->test_page && d->model, "%s: test page", d->id);
         for (int i = 0; d->test_page && d->model && i < d->nresolutions; i++) {
             int dpi = d->resolutions[i];
@@ -371,9 +476,11 @@ int main(int argc, char **argv)
     }
     if (argc >= 2 && !strcmp(argv[1], "selftest"))
         return cmd_selftest();
+    if (argc >= 3 && !strcmp(argv[1], "tp732h-check"))
+        return cmd_tp_check(argc - 2, argv + 2);
     fprintf(stderr,
             "usage: %s testpage <300|600> out.prn | encode [--model MG2400] <300|600> <a4|letter> out.prn page.raw... "
-            "| selftest\n",
+            "| selftest | tp732h-check capture.prn...\n",
             argv[0]);
     return 2;
 }

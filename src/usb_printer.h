@@ -9,7 +9,6 @@
 #include "esp_err.h"
 #include "freertos/FreeRTOS.h"
 
-#define CANON_VID 0x04a9
 
 typedef struct {
     uint16_t vid, pid;

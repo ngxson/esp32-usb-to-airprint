@@ -186,6 +186,14 @@ static void render(const char *dir)
     s.started = false;
     sc[n++] = (scenario_t){"no-wifi", s};
 
+    s = base();
+    s.wifi_configured = false;
+    s.ip[0] = 0;
+    s.started = false;
+    s.setup_ap = "Printer-Setup-A1B2";
+    s.setup_ip = "192.168.4.1";
+    sc[n++] = (scenario_t){"wifi-setup", s};
+
     uint8_t fb[OLED_FB_SIZE];
     for (int i = 0; i < n; i++) {
         oled_ui_render(&sc[i].st, fb);

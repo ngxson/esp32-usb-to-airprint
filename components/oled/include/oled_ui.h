@@ -2,7 +2,8 @@
 // Portable: the platform gathers the state and sends the frame buffer.
 //
 //   canon-mg2500       ▂▄▆█    host name, WiFi signal
-//   192.168.2.173              IP address (or "Connecting to WiFi")
+//   192.168.2.173              IP address (or "Connecting to WiFi", or the
+//                              setup network's address)
 //   ────────────────────────
 //   PRINTING                   headline, double size
 //   Invoice.pdf                two lines of details
@@ -30,7 +31,9 @@ extern "C" {
 
 typedef struct {
     const char *name;           // host name
-    bool wifi_configured;       // false: no WiFi in .env, the printer works locally only
+    bool wifi_configured;       // false: no network to join, the printer works locally only
+    const char *setup_ap;       // the WiFi setup network's name while it runs, else NULL
+    const char *setup_ip;       // its page's address
     char ip[16];                // "" while not connected
     int rssi;                   // dBm, 0 = unknown
     bool started;               // the print server runs (else only print.status.connected counts)

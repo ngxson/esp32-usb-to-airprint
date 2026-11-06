@@ -41,6 +41,19 @@ menu "Printer server"
         int "User button GPIO (no action assigned: on_user_button in main.c; active low, -1 = none)"
         default 5
 
+    config WIFI_SETUP_AFTER_MIN
+        int "Open the WiFi setup network after this many minutes without WiFi (0 = never)"
+        range 0 1440
+        default 5
+        help
+            When the saved network does not answer for this long (another
+            router, a new password), the board restarts into its setup
+            network "Printer-Setup-XXXX" to choose again. It keeps trying the
+            saved network meanwhile and restarts when it is back. Only when
+            SETUP_PASSWORD (.env) protects the setup network: an open one
+            would let anyone who keeps the board off its network point it at
+            theirs. Without it, hold BOOT 10 s to choose again.
+
     config OLED_SDA_GPIO
         int "Status screen (I2C OLED) SDA GPIO"
         default 42

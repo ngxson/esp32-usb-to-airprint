@@ -348,7 +348,13 @@ void oled_ui_render(const oled_state_t *st, uint8_t *fb)
     text_fit(fb, 0, Y_NAME, st->name ? st->name : "", OLED_WIDTH - 20);
     if (st->wifi_configured)
         wifi_icon(fb, OLED_WIDTH - 1, Y_NAME, st->ip[0] != 0, st->rssi);
-    line(fb, Y_IP, st->ip[0] ? st->ip : st->wifi_configured ? "Connecting to WiFi..." : "No WiFi configured");
+    if (st->setup_ap) {
+        char buf[40];
+        snprintf(buf, sizeof(buf), "Setup: %s", st->setup_ip ? st->setup_ip : "");
+        line(fb, Y_IP, buf);
+    } else {
+        line(fb, Y_IP, st->ip[0] ? st->ip : st->wifi_configured ? "Connecting to WiFi..." : "No WiFi configured");
+    }
     oled_fill(fb, 0, Y_RULE, OLED_WIDTH, 1, true);
 
     // what the device does, most important first
@@ -362,6 +368,10 @@ void oled_ui_render(const oled_state_t *st, uint8_t *fb)
     } else if (pa->status.busy) {
         headline(fb, "PRINTING");       // the button's test page
         line(fb, Y_LINE1, "Test page");
+    } else if (st->setup_ap) {
+        headline(fb, "WIFI SETUP");
+        line(fb, Y_LINE1, "Join this WiFi:");
+        line(fb, Y_LINE2, st->setup_ap);
     } else if (scan_recent && (!job_recent || sc->ended_ago <= pa->job.ended_ago)) {
         render_scan(fb, sc);
     } else if (job_recent) {

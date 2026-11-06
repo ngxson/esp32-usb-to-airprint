@@ -620,6 +620,9 @@ void debug_ota_confirm(bool (*healthy)(void), int settle_s, int timeout_s)
     int ok_for = 0;
     for (int t = 0; t < timeout_s; t++) {
         vTaskDelay(pdMS_TO_TICKS(1000));
+        // confirmed meanwhile by someone else (the WiFi setup page, once it has joined a network)
+        if (esp_ota_get_state_partition(run, &st) == ESP_OK && st != ESP_OTA_IMG_PENDING_VERIFY)
+            return;
         ok_for = healthy() ? ok_for + 1 : 0;
         if (ok_for >= settle_s) {
             esp_ota_mark_app_valid_cancel_rollback();

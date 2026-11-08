@@ -256,3 +256,4 @@ fi
 
 echo "== firmware build"
 pio run -e esp32s3 | grep -E "RAM:|Flash:|SUCCESS|FAILED"
+python3 tools/gen_symbols.py check .pio/build/esp32s3/firmware.elf .pio/build/esp32s3/firmware.bin

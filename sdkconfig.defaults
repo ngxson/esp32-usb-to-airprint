@@ -39,6 +39,11 @@ CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y
 # Crashes leave an ELF core dump in the "coredump" partition
 CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH=y
 CONFIG_ESP_COREDUMP_DATA_FORMAT_ELF=y
+# (CONFIG_ESP_COREDUMP_CAPTURE_DRAM would add the whole internal heap: more than
+# the 128 KB partition. Variables worth keeping are COREDUMP_DRAM_ATTR instead.)
+# a hang (the idle tasks starved for 5 s) panics: core dump and reboot,
+# instead of a board that only logs it and stays stuck
+CONFIG_ESP_TASK_WDT_PANIC=y
 # task list on the debug server's /info
 CONFIG_FREERTOS_USE_TRACE_FACILITY=y
 CONFIG_FREERTOS_USE_STATS_FORMATTING_FUNCTIONS=y

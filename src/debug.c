@@ -26,6 +26,7 @@
 #include "freertos/semphr.h"
 #include "freertos/task.h"
 #include "local_config.h"
+#include "symtab.h"
 
 static const char *TAG = "debug";
 
@@ -173,6 +174,22 @@ static void log_coredump_summary(void)
             n += snprintf(bt + n, sizeof(bt) - n, " 0x%08lx", (unsigned long)sm->exc_bt_info.bt[i]);
         ESP_LOGE(TAG, "a previous run crashed: task %s, PC 0x%08lx, backtrace%s%s", sm->exc_task,
                  (unsigned long)sm->exc_pc, bt, sm->exc_bt_info.corrupted ? " (corrupted)" : "");
+        // the names, from the symbol table of the build that crashed (this one or the other slot)
+        const char *sha = (const char *)sm->app_elf_sha256;
+        const esp_partition_t *part = symtab_find_app(sha);
+        symtab_t st;
+        if (part && symtab_open(part, &st) == ESP_OK) {
+            char name[80];
+            uint32_t depth = sm->exc_bt_info.depth < 16 ? sm->exc_bt_info.depth : 16;
+            if (!depth)
+                ESP_LOGE(TAG, "  0x%08lx %s", (unsigned long)sm->exc_pc, symtab_name(&st, sm->exc_pc, name, sizeof(name)));
+            for (uint32_t i = 0; i < depth; i++)
+                ESP_LOGE(TAG, "  0x%08lx %s", (unsigned long)sm->exc_bt_info.bt[i],
+                         symtab_name(&st, sm->exc_bt_info.bt[i], name, sizeof(name)));
+            symtab_close(&st);
+        } else {
+            ESP_LOGW(TAG, "no symbol table for build %s%s", sha, part ? "" : " (no longer in flash)");
+        }
     }
     ESP_LOGE(TAG, "core dump of %u bytes kept: tools/remote.py crash", (unsigned)size);
     free(sm);
@@ -314,6 +331,7 @@ static esp_err_t root_get(httpd_req_t *req)
                      "  POST /reboot\n"
                      "  GET  /coredump        last crash's core dump (ELF)\n"
                      "  POST /coredump/erase\n"
+                     "  GET  /symbols[?sha=<elf sha256 prefix>]  function names of a build in flash\n"
                      "  POST /panic           crash on purpose (to try the core dump tools)\n"
                      "  POST /loglevel?tag=<tag|*>&level=<none|error|warn|info>\n"
                      "tools/remote.py does all of this.\n");
@@ -543,6 +561,34 @@ static esp_err_t coredump_get(httpd_req_t *req)
     return r == ESP_OK ? httpd_resp_send_chunk(req, NULL, 0) : r;
 }
 
+// The symbol table of a build in flash (tools/gen_symbols.py): the running one,
+// or the one whose ELF SHA-256 starts with ?sha= (a core dump's build).
+static esp_err_t symbols_get(httpd_req_t *req)
+{
+    char q[96], sha[72] = "";
+    if (httpd_req_get_url_query_str(req, q, sizeof(q)) == ESP_OK)
+        httpd_query_key_value(q, "sha", sha, sizeof(sha));
+    const esp_partition_t *part = symtab_find_app(sha);
+    size_t off, size;
+    if (!part)
+        return send_text(req, "404 Not Found", "no build with that ELF SHA-256 in flash\n");
+    if (symtab_locate(part, &off, &size) != ESP_OK)
+        return send_text(req, "404 Not Found", "that build has no symbol table\n");
+    char *buf = malloc(SEND_PIECE);
+    if (!buf)
+        return send_text(req, "500 Internal Server Error", "no memory\n");
+    httpd_resp_set_type(req, "application/octet-stream");
+    esp_err_t r = ESP_OK;
+    for (size_t pos = 0; pos < size && r == ESP_OK; pos += SEND_PIECE) {
+        size_t n = size - pos < SEND_PIECE ? size - pos : SEND_PIECE;
+        r = esp_partition_read(part, off + pos, buf, n);
+        if (r == ESP_OK)
+            r = httpd_resp_send_chunk(req, buf, (ssize_t)n);
+    }
+    free(buf);
+    return r == ESP_OK ? httpd_resp_send_chunk(req, NULL, 0) : r;
+}
+
 static esp_err_t coredump_erase_post(httpd_req_t *req)
 {
     esp_err_t r = esp_core_dump_image_erase();
@@ -597,6 +643,7 @@ esp_err_t debug_server_start(bool (*busy)(void))
         {.uri = "/reboot", .method = HTTP_POST, .handler = reboot_post},
         {.uri = "/coredump", .method = HTTP_GET, .handler = coredump_get},
         {.uri = "/coredump/erase", .method = HTTP_POST, .handler = coredump_erase_post},
+        {.uri = "/symbols", .method = HTTP_GET, .handler = symbols_get},
         {.uri = "/loglevel", .method = HTTP_POST, .handler = loglevel_post},
         {.uri = "/panic", .method = HTTP_POST, .handler = panic_post},
     };

@@ -17,6 +17,7 @@
 #include "shared_buf.h"
 
 #ifdef ESP_PLATFORM
+#include "esp_attr.h"
 #include "esp_log.h"
 #include "esp_random.h"
 #include "freertos/FreeRTOS.h"
@@ -24,10 +25,12 @@
 #define LOGI(...) ESP_LOGI("scan", __VA_ARGS__)
 #define LOGW(...) ESP_LOGW("scan", __VA_ARGS__)
 #define THREAD_STACK (8 * 1024)
+#define IN_CORE_DUMP COREDUMP_DRAM_ATTR     // kept in a crash's core dump
 #else
 #define LOGI(fmt, ...) fprintf(stderr, "I scan: " fmt "\n", ##__VA_ARGS__)
 #define LOGW(fmt, ...) fprintf(stderr, "W scan: " fmt "\n", ##__VA_ARGS__)
 #define THREAD_STACK (512 * 1024)    // host build runs with sanitizers
+#define IN_CORE_DUMP
 #endif
 
 #define QUALITY 85
@@ -64,7 +67,7 @@ static const scan_config_t *s_cfg;
 static pthread_mutex_t s_lock = PTHREAD_MUTEX_INITIALIZER;
 static pthread_cond_t s_cond = PTHREAD_COND_INITIALIZER;   // any change below
 
-static struct {
+static IN_CORE_DUMP struct {
     scan_state_t state;
     bool running;               // thread alive: holds the buffer (and the device until closed)
     bool producing;             // the encoder may still write

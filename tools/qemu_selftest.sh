@@ -170,8 +170,19 @@ if grep -q "QEMU_SELFTEST ipp ready" "$OUT/serial.log"; then
     wait_boot 5
     check "reset reason after the crash" "$(curl -s -m 10 $D/info | awk '$1 == "reset" {print $2}')" panic
     check "crash summary in the log" "$(curl -s -m 10 $D/log | grep -ac 'a previous run crashed')" 1
-    $R crash --erase --elf $B/firmware.elf > "$OUT/crash.txt" 2>&1 || true
-    check "core dump decoded" "$(grep -c 'panic_cb' "$OUT/crash.txt" | tr -d ' ' | sed 's/^[1-9][0-9]*$/found/')" found
+    found() { grep -c "$1" | tr -d ' ' | sed 's/^[1-9][0-9]*$/found/'; }
+    # the board names the frames itself, from the symbol table after its image
+    check "crash summary names the function" "$(curl -s -m 10 $D/log | grep -a -A3 'a previous run crashed' | found ' panic_cb+0x')" found
+    curl -s -m 60 -o "$OUT/symbols.bin" $D/symbols
+    check "/symbols: the running build's table" "$(python3 -c "import sys; sys.path.insert(0, 'tools'); import gen_symbols as g
+t = g.Table(open(sys.argv[1], 'rb').read()); print('ok' if t.elf_sha == g.image_elf_sha(open(sys.argv[2], 'rb').read()) else 'other build')" "$OUT/symbols.bin" $B/firmware.bin 2>&1)" ok
+    $R crash --symbols > "$OUT/crash-sym.txt" 2>&1 || true
+    check "core dump decoded with the board's symbols" "$(grep -A3 'crashed$' "$OUT/crash-sym.txt" | found ' panic_cb+0x')" found
+    check "core dump: exception cause" "$(grep -c '^crash: StoreProhibited' "$OUT/crash-sym.txt")" 1
+    # with the ELF the build kept in .pio/elf
+    $R crash --erase > "$OUT/crash.txt" 2>&1 || true
+    check "core dump decoded" "$(found 'panic_cb' < "$OUT/crash.txt")" found
+    check "core dump: the scan state kept" "$(found 'calibrated = ' < "$OUT/crash.txt")" found
     check "core dump erased" "$(field coredump)" none
 else
     echo "IPP server did not come up"; status=1

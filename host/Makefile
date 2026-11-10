@@ -5,7 +5,7 @@ CFLAGS += -ffp-contract=off
 BJL = ../components/canon_bjl/canon_bjl.c ../components/canon_bjl/testpage.c ../components/canon_bjl/bjl_render.c
 AIRPRINT = ../components/airprint/airprint.c ../components/airprint/ipp.c ../components/airprint/raster.c \
            ../components/airprint/events.c ../components/airprint/printer_driver.c
-PRINTERS = ../components/printers/printers.c ../components/printers/canon_pixma.c
+PRINTERS = ../components/printers/printers.c ../components/printers/canon_pixma.c ../components/printers/tp_label.c
 WEBUI = ../components/webui/webui.c ../components/webui/web_assets.c
 SCAN_CORE = ../components/scanner/pixma_scan.c ../components/scanner/jpeg_enc.c ../components/scanner/fake_scanner.c
 SCANNER = $(SCAN_CORE) ../components/scanner/shared_buf.c ../components/scanner/scan_service.c
@@ -14,7 +14,7 @@ INC = -I../components/canon_bjl/include -I../components/airprint/include -I../co
       -I../components/scanner/include -I../components/scanner -I../components/webui/include \
       -I../components/oled/include
 
-all: bjl_host airprint_host scan_host oled_host
+all: bjl_host airprint_host scan_host oled_host rastertoprinter
 
 bjl_host: bjl_host.c $(BJL) $(PRINTERS) ../components/airprint/printer_driver.c ../components/canon_bjl/include/*.h \
           ../components/airprint/include/printer_driver.h
@@ -24,6 +24,12 @@ airprint_host: airprint_host.c $(BJL) $(AIRPRINT) $(PRINTERS) $(SCANNER) $(WEBUI
                ../components/airprint/*.h ../components/scanner/include/*.h ../components/webui/include/*.h \
                ../components/oled/include/*.h
 	$(CC) $(CFLAGS) $(INC) airprint_host.c $(BJL) $(AIRPRINT) $(PRINTERS) $(SCANNER) $(WEBUI) $(OLED) -lm -lpthread -o $@
+
+# CUPS filter (tools/cups/README.md); for the server: make rastertoprinter CFLAGS=-O2
+rastertoprinter: cups_filter.c $(BJL) $(PRINTERS) ../components/airprint/raster.c ../components/airprint/printer_driver.c \
+                 ../components/airprint/include/*.h
+	$(CC) $(CFLAGS) $(INC) cups_filter.c $(BJL) $(PRINTERS) ../components/airprint/raster.c \
+	    ../components/airprint/printer_driver.c -lm -o $@
 
 # the web UI (web/), built and packed when its sources changed
 ../components/webui/web_assets.c: FORCE
@@ -39,4 +45,4 @@ oled_host: oled_host.c $(OLED) ../components/oled/include/*.h ../components/airp
 	$(CC) $(CFLAGS) $(INC) oled_host.c $(OLED) -o $@
 
 clean:
-	rm -rf bjl_host airprint_host scan_host oled_host out *.prn *.png *.raw
+	rm -rf bjl_host airprint_host scan_host oled_host rastertoprinter out *.prn *.png *.raw

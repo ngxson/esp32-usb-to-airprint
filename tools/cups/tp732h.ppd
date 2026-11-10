@@ -1,0 +1,49 @@
+*PPD-Adobe: "4.3"
+*% Grozziie TP732H 80 mm thermal label printer through the rastertoprinter filter
+*% (host/cups_filter.c, the firmware's driver). See tools/cups/README.md.
+*FormatVersion: "4.3"
+*FileVersion: "1.0"
+*LanguageVersion: English
+*LanguageEncoding: ISOLatin1
+*PCFileName: "TP732H.PPD"
+*Manufacturer: "Grozziie"
+*Product: "(TP732H)"
+*ModelName: "Grozziie TP732H label printer"
+*ShortNickName: "TP732H"
+*NickName: "Grozziie TP732H label printer"
+*PSVersion: "(3010.000) 0"
+*LanguageLevel: "3"
+*ColorDevice: False
+*DefaultColorSpace: Gray
+*FileSystem: False
+*Throughput: "1"
+*LandscapeOrientation: Plus90
+*TTRasterizer: Type42
+*cupsVersion: 2.4
+*cupsManualCopies: True
+*cupsModelNumber: 0
+*cupsFilter2: "application/vnd.cups-raster application/vnd.tp732h 0 rastertoprinter"
+
+*% 8-bit sGray (cupsColorSpace 18) at the printer's 203 dpi
+*OpenUI *Resolution/Resolution: PickOne
+*OrderDependency: 10 AnySetup *Resolution
+*DefaultResolution: 203dpi
+*Resolution 203dpi/203 dpi: "<</HWResolution[203 203]/cupsBitsPerColor 8/cupsColorOrder 0/cupsColorSpace 18>>setpagedevice"
+*CloseUI: *Resolution
+
+*OpenUI *PageSize/Label Size: PickOne
+*OrderDependency: 10 AnySetup *PageSize
+*DefaultPageSize: w227h369
+*PageSize w227h369/80 x 130 mm: "<</PageSize[227 369]/ImagingBBox null>>setpagedevice"
+*CloseUI: *PageSize
+
+*OpenUI *PageRegion/Label Size: PickOne
+*OrderDependency: 10 AnySetup *PageRegion
+*DefaultPageRegion: w227h369
+*PageRegion w227h369/80 x 130 mm: "<</PageSize[227 369]/ImagingBBox null>>setpagedevice"
+*CloseUI: *PageRegion
+
+*DefaultImageableArea: w227h369
+*ImageableArea w227h369: "0 0 227 369"
+*DefaultPaperDimension: w227h369
+*PaperDimension w227h369: "227 369"

@@ -204,7 +204,7 @@ static int dev_job_write(void *ctx, const uint8_t *data, size_t len)
 
 static int dev_job_sync(void *ctx, const char *what)
 {
-    ESP_LOGI(TAG, "dev: %s (would wait for the printer here)", what);
+    ESP_LOGI(TAG, "dev: %s (would wait for the printer here)", what ? what : "flush");
     return 0;
 }
 

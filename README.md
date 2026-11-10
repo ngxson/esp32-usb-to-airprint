@@ -38,11 +38,14 @@ Turns any USB-only printers into a wireless printer and scanner. An ESP32-S3 boa
 | 🟡 MP490, MP493, MP495 | MP490 to MP499 | yes |
 | 🟡 MX340, MX350 | MX340 to MX358 | yes (glass only) |
 | 🟡 MX360, MX410, MX420 | MX360 to MX428 | yes (glass only) |
+| 🟢 Grozziie TP732H 80 mm thermal label printer | TP732H (USB 4c4a:c200) | no scanner |
 
 - 🟢 Validated on real printer
 - 🟡 Expected to work, not tested on real hardware yet.
 
 The firmware recognises the printer when it is plugged in. Other printers? Please open an issue or a PR.
+
+The drivers also work from a Linux CUPS server, without the board: see [tools/cups/README.md](tools/cups/README.md).
 
 ## What you need
 

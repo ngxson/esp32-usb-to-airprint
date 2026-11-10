@@ -21,6 +21,8 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 QEMU=${QEMU_XTENSA:-qemu-system-xtensa}
 PY=~/.platformio/penv/bin/python
+# PlatformIO installed some other way (e.g. Homebrew): the Python that runs pio
+[ -x "$PY" ] || PY=$(head -1 "$(command -v pio)" | sed 's/^#! *//')
 ESPTOOL=~/.platformio/packages/tool-esptoolpy/esptool.py
 B=.pio/build/qemu
 OUT=$(mktemp -d)

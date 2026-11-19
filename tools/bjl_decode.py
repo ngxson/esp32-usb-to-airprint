@@ -182,6 +182,9 @@ class Decoder:
             if bits:
                 inks.append((bits, levels))
         self.state["t_inks"] = inks
+        # 13 slots list the inks in ESC (L order (C,M,Y,K); 7 slots (Gutenprint's
+        # "7_" inksets, PIXMA G1000) list them K,C,M,Y
+        self.state["t_order"] = "KCMY" if len(a) == 3 + 7 * 3 else None
         return "image format %02x %02x %02x, inks(bits,levels)=%s" % (a[0], a[1], a[2], inks)
 
     def cmd_c(self, a):
@@ -226,7 +229,11 @@ class Decoder:
         inks = self.state.get("t_inks", [])
         if len(inks) != len(chans):
             raise DecodeError("ESC (L lists %d channels but ESC (t declares %d inks" % (len(chans), len(inks)))
-        bits = {c: inks[i][0] for i, c in enumerate(chans)}
+        order = self.state.get("t_order")
+        if order and sorted(order) == sorted(chans):
+            bits = {c: inks[order.index(c)][0] for c in chans}
+        else:
+            bits = {c: inks[i][0] for i, c in enumerate(chans)}
         self.page = Page(chans, bits)
         self.block_idx = 0
         return "channel order %s" % chans

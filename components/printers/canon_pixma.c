@@ -222,6 +222,7 @@ static const printer_paper_t PAPERS[] = {
 
 static const bjl_model_id_t MODELS[BJL_MODEL_COUNT] = {
     BJL_MODEL_MG2400, BJL_MODEL_MG2900, BJL_MODEL_IP2800, BJL_MODEL_E3100, BJL_MODEL_MP230, BJL_MODEL_IP2700,
+    BJL_MODEL_G1000,
 };
 
 // mdl: the IEEE 1284 MDL; pid: the USB product id (from SANE's pixma
@@ -281,3 +282,5 @@ CANON_PIXMA(canon_mx350_driver, "canon-mx350", "MX350 series", 0x1742, BJL_MODEL
 CANON_PIXMA(canon_mx360_driver, "canon-mx360", "MX360 series", 0x174d, BJL_MODEL_IP2700, true);
 CANON_PIXMA(canon_mx410_driver, "canon-mx410", "MX410 series", 0x174e, BJL_MODEL_IP2700, true);
 CANON_PIXMA(canon_mx420_driver, "canon-mx420", "MX420 series", 0x174f, BJL_MODEL_IP2700, true);
+// G1010 (print only, IEEE 1284 CMD:BJRaster3,IVEC): G1000 stream, tested on paper (600 dpi test page)
+CANON_PIXMA(canon_g1010_driver, "canon-g1010", "G1010 series", 0x183c, BJL_MODEL_G1000, false);

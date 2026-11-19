@@ -62,6 +62,7 @@ typedef enum {
     BJL_MODEL_E3100,        // E3100 / TS3100
     BJL_MODEL_MP230,        // MP230
     BJL_MODEL_IP2700,       // iP2700, MP250, MP270, MP280, MP490, MP493, MP495, MX340, MX350, MX360, MX410, MX420
+    BJL_MODEL_G1000,        // G1000 (ink tanks: no ESC (T, 7-slot ESC (t); tried for the G1010
     BJL_MODEL_COUNT,
 } bjl_model_id_t;
 
@@ -73,6 +74,9 @@ typedef struct {
     uint8_t esc_v;                         // sends ESC (v (page rotation)
     uint8_t esc_w;                         // sends ESC (w on the first page
     const char *control;                   // BJL control command before the first reset ("SetSilent=OFF"), or NULL
+    uint8_t no_esc_T;                      // no ESC (T cartridge selection (no CANON_CAP_T: ink tank models)
+    uint8_t ink7_kcmy;                     // ESC (t lists 7 ink slots K,C,M,Y (Gutenprint inkset "7_"),
+                                           // else 13 slots C,M,Y,K ("13_")
 } bjl_model_t;
 
 typedef enum {

@@ -26,7 +26,7 @@ STP_DATA_PATH=$GP/src/xml ./gp_ref 300x300dpi ref300_2pages.prn A4 2
 ls -la ref*.prn
 # canon_bjl.h model -> a Gutenprint driver using that stream
 for m in MG2900:bjc-MG2900-series iP2800:bjc-iP2800-series E3100:bjc-E3100-series MP230:bjc-MULTIPASS-MP230 \
-         iP2700:bjc-PIXMA-iP2700; do
+         iP2700:bjc-PIXMA-iP2700 G1000:bjc-G1000-series; do
     mkdir -p ${m%%:*}
     export GP_DRIVER=${m#*:}
     STP_DATA_PATH=$GP/src/xml ./gp_ref 300x300dpi ${m%%:*}/ref300.prn 2>/dev/null

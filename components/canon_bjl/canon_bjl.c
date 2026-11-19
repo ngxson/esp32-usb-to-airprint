@@ -33,6 +33,9 @@ static const bjl_model_t MODELS[BJL_MODEL_COUNT] = {
     [BJL_MODEL_E3100] = {"E3100", 9, 0xff, 2, 1, 1, NULL},
     [BJL_MODEL_MP230] = {"MP230", 9, 0x00, 3, 0, 0, NULL},
     [BJL_MODEL_IP2700] = {"iP2700", 6, 0x00, 3, 0, 0, "SetSilent=OFF"},
+    // PIXMA G1000: caps without CANON_CAP_T and CANON_CAP_w, modes with the
+    // 7_K2C3M3Y2 / 7_K2C2M2Y2 inksets (same bits and levels per ink)
+    [BJL_MODEL_G1000] = {"G1000", 9, 0xff, 3, 1, 0, NULL, 1, 1},
 };
 
 // Gutenprint canon_PIXMA_MG2400_modes, the same for every model above:
@@ -315,14 +318,17 @@ int bjl_page_begin(bjl_job_t *j)
     put_be16(b + 2, m->dpi);                        // x resolution
     emit_cmd(j, 'd', b, 4);
 
-    // ESC (t: 3 header bytes + 13 ink slots of {bits, 0, levels}
-    memset(b, 0, 42);
+    // ESC (t: 3 header bytes + 13 ink slots of {bits, 0, levels} in C,M,Y,K
+    // order, or 7 slots in K,C,M,Y order (Gutenprint's num_inks * 3 + 3)
+    int slots = model->ink7_kcmy ? 7 : 13;
+    memset(b, 0, 3 + slots * 3);
     memcpy(b, m->t_head, 3);
     for (int c = 0; c < BJL_NUM_CHANNELS; c++) {
-        b[3 + c * 3] = m->bits[c];
-        b[3 + c * 3 + 2] = m->levels[c];
+        int slot = model->ink7_kcmy ? (c == BJL_K ? 0 : c + 1) : c;
+        b[3 + slot * 3] = m->bits[c];
+        b[3 + slot * 3 + 2] = m->levels[c];
     }
-    emit_cmd(j, 't', b, 42);
+    emit_cmd(j, 't', b, 3 + slots * 3);
 
     b[0] = 0x30;                                    // model id 3 << 4, colour
     b[1] = BJL_MEDIA_PLAIN;
@@ -347,7 +353,8 @@ int bjl_page_begin(bjl_job_t *j)
     emit_cmd(j, 'P', escP, model->esc_P_len);
 
     static const uint8_t escT[] = {0x03, 0x04, 0x04};   // cartridge: both (black + colour)
-    emit_cmd(j, 'T', escT, sizeof(escT));
+    if (!model->no_esc_T)
+        emit_cmd(j, 'T', escT, sizeof(escT));
     static const uint8_t escl[] = {0x34, 0x00, 0x00};   // rear tray, plain media[, gap]
     emit_cmd(j, 'l', escl, model->esc_l_len);
     b[0] = 0x00;                                    // no page rotation

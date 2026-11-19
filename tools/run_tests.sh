@@ -67,7 +67,7 @@ if [ -n "${GUTENPRINT:-}" ]; then
     python3 tools/compare_gutenprint.py $R/ref300_letter.prn 300 --paper letter
     python3 tools/compare_gutenprint.py $R/ref300_2pages.prn 300
     echo "== comparison with Gutenprint, the other stream variants (canon_bjl.h models)"
-    for m in MG2900 iP2800 E3100 MP230 iP2700; do
+    for m in MG2900 iP2800 E3100 MP230 iP2700 G1000; do
         echo "-- $m"
         python3 tools/compare_gutenprint.py $R/$m/ref300.prn 300 --model $m
         python3 tools/compare_gutenprint.py $R/$m/ref600.prn 600 --model $m

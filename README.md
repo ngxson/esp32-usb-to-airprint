@@ -22,6 +22,7 @@ Turns any USB-only printers into a wireless printer and scanner. An ESP32-S3 boa
 | Series | Models | Scan |
 |---|---|---|
 | 🟢 MG2500 | MG2550S | yes |
+| 🟢 G1010 | G1010 | no scanner |
 | 🟡 MG2400 | MG2410 to MG2490 | yes |
 | 🟡 MG2500 | MG2510 to MG2590 (other than the MG2500S) | yes |
 | 🟡 P200 | P200 | no scanner |

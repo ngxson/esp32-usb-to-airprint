@@ -319,6 +319,8 @@ static int cmd_selftest(void)
             {0x04a9, 0x176d, "MFG:Canon;CMD:BJL,BJRaster3,BSCCe,IVEC,IVECPLI;MDL:MG2500 series;CLS:PRINTER;",
              "canon-mg2500"},
             {0x04a9, 0x1746, "", "canon-mp280"},                              // by USB id
+            {0x04a9, 0x183c, "MFG:Canon;CMD:BJRaster3,IVEC;MDL:G1010 series;CLS:PRINTER;", "canon-g1010"},
+            {0x04a9, 0x1234, "MFG:Canon;MDL:G1010 series;", "canon-g1010"},
             {0x04a9, 0x1234, "MFG:Canon;MDL:iP2700 series;", "canon-ip2700"},  // by model name
             {0x04a9, 0x1234, "MANUFACTURER:Canon;MODEL:iP2800 series;", "canon-ip2800"},
             {0x04a9, 0x1234, "MFG:Canon;MDL:P200;", "canon-p200"},            // " series" optional

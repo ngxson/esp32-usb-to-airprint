@@ -35,7 +35,8 @@ int main(int argc, char **argv)
         int dpi = h.HWResolution[0];
         int src_w = PAGE[paper][0] * dpi / 72 + 1, src_h = PAGE[paper][1] * dpi / 72 + 1;
         int left = (PAGE[paper][2] * dpi + 36) / 72, top = (PAGE[paper][3] * dpi + 36) / 72;
-        if (h.cupsBitsPerPixel != 8 || left + h.cupsWidth > (unsigned)src_w || top + h.cupsHeight > (unsigned)src_h) {
+        if (h.cupsBitsPerPixel != 8 || h.cupsBytesPerLine < h.cupsWidth || left + h.cupsWidth > (unsigned)src_w ||
+            top + h.cupsHeight > (unsigned)src_h) {
             fprintf(stderr, "kpsl_host: a %ux%u, %u-bit raster is not the %s PPD's\n", h.cupsWidth, h.cupsHeight,
                     h.cupsBitsPerPixel, paper ? "Letter" : "A4");
             err = 1;

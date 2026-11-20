@@ -38,6 +38,7 @@ Turns any USB-only printers into a wireless printer and scanner. An ESP32-S3 boa
 | 🟡 MP490, MP493, MP495 | MP490 to MP499 | yes |
 | 🟡 MX340, MX350 | MX340 to MX358 | yes (glass only) |
 | 🟡 MX360, MX410, MX420 | MX360 to MX428 | yes (glass only) |
+| 🟢 Kyocera FS-1040 | FS-1040 (KPSL, 600 dpi, black and white) | no scanner |
 
 - 🟢 Validated on real printer
 - 🟡 Expected to work, not tested on real hardware yet.

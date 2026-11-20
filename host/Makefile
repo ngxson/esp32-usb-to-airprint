@@ -5,14 +5,15 @@ CFLAGS += -ffp-contract=off
 BJL = ../components/canon_bjl/canon_bjl.c ../components/canon_bjl/testpage.c ../components/canon_bjl/bjl_render.c
 AIRPRINT = ../components/airprint/airprint.c ../components/airprint/ipp.c ../components/airprint/raster.c \
            ../components/airprint/events.c ../components/airprint/printer_driver.c
-PRINTERS = ../components/printers/printers.c ../components/printers/canon_pixma.c
+PRINTERS = ../components/printers/printers.c ../components/printers/canon_pixma.c \
+           ../components/printers/kyocera_kpsl.c ../components/printers/jbig/jbig.c ../components/printers/jbig/jbig_ar.c
 WEBUI = ../components/webui/webui.c ../components/webui/web_assets.c
 SCAN_CORE = ../components/scanner/pixma_scan.c ../components/scanner/jpeg_enc.c ../components/scanner/fake_scanner.c
 SCANNER = $(SCAN_CORE) ../components/scanner/shared_buf.c ../components/scanner/scan_service.c
 OLED = ../components/oled/oled_ui.c
 INC = -I../components/canon_bjl/include -I../components/airprint/include -I../components/airprint \
       -I../components/scanner/include -I../components/scanner -I../components/webui/include \
-      -I../components/oled/include
+      -I../components/oled/include -I../components/printers/jbig
 
 all: bjl_host airprint_host scan_host oled_host
 
@@ -38,5 +39,12 @@ oled_host: oled_host.c $(OLED) ../components/oled/include/*.h ../components/airp
            ../components/scanner/include/*.h
 	$(CC) $(CFLAGS) $(INC) oled_host.c $(OLED) -o $@
 
+# the Kyocera driver against rastertokpsl-re (kpsl_host.c; needs libcups, so not in all)
+kpsl_host: kpsl_host.c $(BJL) $(PRINTERS) ../components/airprint/printer_driver.c
+	$(CC) $(CFLAGS) -Wno-deprecated-declarations $(INC) kpsl_host.c $(BJL) $(PRINTERS) ../components/airprint/printer_driver.c -lcups -lm -o $@
+
+# the headers $(PRINTERS) build with
+bjl_host airprint_host kpsl_host: ../components/printers/jbig/*.h ../components/airprint/include/printer_driver.h
+
 clean:
-	rm -rf bjl_host airprint_host scan_host oled_host out *.prn *.png *.raw
+	rm -rf bjl_host airprint_host scan_host oled_host kpsl_host out *.prn *.png *.raw

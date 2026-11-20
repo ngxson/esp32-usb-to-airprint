@@ -540,7 +540,7 @@ static void open_device(uint8_t addr)
                  (st & 0x10) ? "selected " : "", (st & 0x08) ? "no error" : "ERROR");
 
     if (info.vid != CANON_VID)
-        ESP_LOGW(TAG, "not a Canon printer: Canon raster jobs will print garbage on it");
+        ESP_LOGI(TAG, "not a Canon printer: no IVEC back channel (status and job replies)");
 
     xSemaphoreTake(s_p.lock, portMAX_DELAY);
     s_p.info = info;

@@ -7,6 +7,7 @@
 //                                           for a model of canon_bjl.h (default MG2400)
 //   bjl_host selftest                       PackBits / framing unit tests, and the
 //                                           printer drivers' test pages against testpage
+#define _GNU_SOURCE     // memmem
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -144,6 +145,7 @@ static size_t unpack(const uint8_t *in, size_t n, uint8_t *out)
 }
 
 static int failures;
+static void brother_selftest(void);
 #define CHECK(cond, ...)                                                                           \
     do {                                                                                           \
         if (!(cond)) {                                                                             \
@@ -283,6 +285,8 @@ static int cmd_selftest(void)
     CHECK(printer_driver_find("canon-mg2500"), "canon-mg2500 driver");
     for (int k = 0; printer_drivers[k]; k++) {
         const printer_driver_t *d = printer_drivers[k];
+        if (strcmp(d->usb_mfg, "Canon"))
+            continue;
         CHECK(d->test_page && d->model, "%s: test page", d->id);
         for (int i = 0; d->test_page && d->model && i < d->nresolutions; i++) {
             int dpi = d->resolutions[i];
@@ -327,6 +331,9 @@ static int cmd_selftest(void)
             {0x03f0, 0x1234, "MFG:HP;MDL:iP2700 series;", NULL},              // another maker
             {0x04a9, 0x1234, "MFG:Canon;MDL:iP2700 series XL;", NULL},
             {0x04a9, 0x1234, "", NULL},
+            {0x04f9, 0x1234, "MFG:Brother;CMD:PJL,HBP;MDL:HL-L2300D series;CLS:PRINTER;CID:Brother Laser Type1;",
+             "brother-hl-l2300d"},
+            {0x04f9, 0x1234, "MFG:Canon;MDL:HL-L2300D series;", NULL},
         };
         for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
             const printer_driver_t *d = printer_driver_match(cases[i].vid, cases[i].pid, cases[i].device_id);
@@ -346,8 +353,263 @@ static int cmd_selftest(void)
         }
     }
 
+    brother_selftest();
+
     printf("selftest: %s (%d failures)\n", failures ? "FAILED" : "OK", failures);
     return failures != 0;
+}
+
+// ---------------------------------------------------------------------------
+// Brother HBP (brother_hbp.c): its line compression decoded back, and the
+// test page stream parsed line by line
+
+int brother_hbp_encode_line(const uint8_t *line, const uint8_t *ref, int len, uint8_t *o);
+
+static int br_overflow(const uint8_t **p, const uint8_t *end)
+{
+    int v = 0;
+    while (*p < end) {
+        uint8_t b = *(*p)++;
+        v += b;
+        if (b != 255)
+            break;
+    }
+    return v;
+}
+
+// one encoded line onto line (which holds the reference); bytes used, -1 bad
+static int br_decode_line(const uint8_t *in, const uint8_t *end, uint8_t *line, int len)
+{
+    const uint8_t *p = in;
+    if (p >= end)
+        return -1;
+    int edits = *p++;
+    if (edits == 0xff) {
+        memset(line, 0, len);
+        return 1;
+    }
+    int pos = 0;
+    for (int e = 0; e < edits; e++) {
+        if (p >= end)
+            return -1;
+        uint8_t c = *p++;
+        int off, cnt;
+        if (c & 0x80) {
+            off = (c >> 5) & 3;
+            if (off == 3)
+                off += br_overflow(&p, end);
+            cnt = c & 31;
+            if (cnt == 31)
+                cnt += br_overflow(&p, end);
+            cnt += 2;
+            pos += off;
+            if (p >= end || pos + cnt > len)
+                return -1;
+            memset(line + pos, *p++, cnt);
+        } else {
+            off = (c >> 3) & 15;
+            if (off == 15)
+                off += br_overflow(&p, end);
+            cnt = c & 7;
+            if (cnt == 7)
+                cnt += br_overflow(&p, end);
+            cnt += 1;
+            pos += off;
+            if (p + cnt > end || pos + cnt > len)
+                return -1;
+            memcpy(line + pos, p, cnt);
+            p += cnt;
+        }
+        pos += cnt;
+    }
+    return (int)(p - in);
+}
+
+typedef struct {
+    uint8_t *buf;
+    size_t len, cap;
+} br_capture_t;
+
+static int br_capture(void *ctx, const uint8_t *data, size_t len)
+{
+    br_capture_t *c = ctx;
+    if (c->len + len > c->cap) {
+        c->cap = (c->len + len) * 2;
+        c->buf = realloc(c->buf, c->cap);
+    }
+    memcpy(c->buf + c->len, data, len);
+    c->len += len;
+    return 0;
+}
+
+static void brother_selftest(void)
+{
+    const printer_driver_t *d = printer_driver_find("brother-hl-l2300d");
+    CHECK(d, "brother-hl-l2300d driver");
+    if (!d)
+        return;
+
+    // random lines with runs, against random references, round trip
+    enum { LEN = 638 };
+    static uint8_t line[LEN], ref[LEN], dec[LEN], enc[LEN + 64];
+    uint32_t rnd = 12345;
+#define RND() (rnd = rnd * 1103515245u + 12345u, (rnd >> 16) & 0x7fff)
+    for (int t = 0; t < 20000; t++) {
+        int kind = t % 5;
+        for (int i = 0; i < LEN; i++) {
+            ref[i] = (kind == 0) ? 0 : (RND() % 4 == 0 ? RND() & 0xff : (i ? ref[i - 1] : 0));
+            line[i] = ref[i];
+        }
+        int nchanges = RND() % (kind == 4 ? 400 : 12);
+        for (int c = 0; c < nchanges; c++) {
+            int at = RND() % LEN, n = 1 + RND() % (kind == 3 ? 600 : 40);
+            uint8_t v = RND() & 0xff;
+            bool run = RND() & 1;
+            for (int i = at; i < at + n && i < LEN; i++)
+                line[i] = run ? v : (uint8_t)(RND() & 0xff);
+        }
+        if (t % 97 == 0)
+            memset(line, 0, LEN);
+        bool noref = t % 7 == 0;
+        int n = brother_hbp_encode_line(line, noref ? NULL : ref, LEN, enc);
+        CHECK(n > 0 && n <= LEN + 32, "brother: encoded length %d", n);
+        memcpy(dec, noref ? (uint8_t[LEN]){0} : ref, LEN);
+        int used = br_decode_line(enc, enc + n, dec, LEN);
+        if (used != n || memcmp(dec, line, LEN)) {
+            CHECK(0, "brother: line %d round trip (used %d of %d)", t, used, n);
+            break;
+        }
+    }
+
+    // the test page: PJL header, one raster group of the page's lines in
+    // blocks of at most 64 lines, the end of the job
+    br_capture_t cap = {0};
+    printer_io_t io = {.write = br_capture, .ctx = &cap};
+    CHECK(d->test_page(d, &io, 600, "DRY RUN") == 0, "brother: test page");
+    const char *s = (const char *)cap.buf;
+    // Letter, less the printer's origin (5 mm from the left and the top)
+    int width = 21590 * 600 / 2540 - 118, height = 27940 * 600 / 2540 - 118, lb = (width + 7) / 8;
+    const char *g = memmem(cap.buf, cap.len, "\033*b1030m", 8);
+    CHECK(cap.len > 200 && !memcmp(s + 128, "\033%-12345X@PJL\n", 14), "brother: job header");
+    CHECK(memmem(cap.buf, cap.len, "@PJL SET PAPER = LETTER\n", 24) && memmem(cap.buf, cap.len, "@PJL SET RESOLUTION = 600\n", 26),
+          "brother: page settings");
+    CHECK(g, "brother: raster group");
+    if (g) {
+        const uint8_t *p = (const uint8_t *)g + 8, *end = cap.buf + cap.len;
+        uint8_t *cur = calloc(1, lb);
+        int lines = 0, black = 0;
+        bool ok = true;
+        while (ok && p < end && *p >= '0' && *p <= '9') {
+            const uint8_t *num = p;
+            int n = 0;
+            while (*p >= '0' && *p <= '9')
+                n = n * 10 + (*p++ - '0');
+            if (*p == 'M') {        // "1030M": the end of the group
+                p = num;
+                break;
+            }
+            if (*p++ != 'w' || p + n > end || p[0] != 0) {
+                ok = false;
+                break;
+            }
+            int nl = p[1];
+            const uint8_t *q = p + 2, *bend = p + n;
+            ok = nl >= 1 && nl <= 64;
+            for (int i = 0; ok && i < nl; i++) {
+                int used = br_decode_line(q, bend, cur, lb);
+                ok = used > 0;
+                q += used > 0 ? used : 0;
+                for (int k = 0; ok && k < lb; k++)
+                    black += __builtin_popcount(cur[k]);
+                lines++;
+            }
+            ok = ok && q == bend;
+            p = bend;
+        }
+        CHECK(ok, "brother: blocks decode (%d lines)", lines);
+        CHECK(lines == height, "brother: %d lines, expected %d", lines, height);
+        CHECK(black > width * height / 50 && black < width * height / 3, "brother: %d black dots", black);
+        CHECK(end - p >= 6 && !memcmp(p, "1030M\f", 6), "brother: end of page");
+        CHECK(memmem(p, end - p, "@PJL EOJ", 8), "brother: end of job");
+        free(cur);
+    }
+    free(cap.buf);
+
+    // the printer's origin: a dot at (300, 500) on the sheet (600 dpi) is
+    // printer pixel (300 - 118, 500 - 118); at 300 dpi a 2x2 dot there
+    for (int pass = 0; pass < 2; pass++) {
+        int dpi = pass ? 300 : 600, sc = pass ? 2 : 1, sw = 5100 / sc, sh = 6600 / sc;
+        br_capture_t c = {0};
+        printer_io_t pio = {.write = br_capture, .ctx = &c};
+        uint8_t *row = malloc(sw);
+        void *job = d->job_begin(d, &pio, dpi, 0);
+        d->page_begin(job, sw, sh, 1);
+        for (int y = 0; y < sh; y++) {
+            memset(row, 255, sw);
+            if (y == 500 / sc)
+                row[300 / sc] = 0;
+            d->page_line(job, y, row);
+        }
+        d->page_end(job);
+        d->job_end(job);
+        free(row);
+        const uint8_t *g2 = memmem(c.buf, c.len, "\033*b1030m", 8), *p = g2 + 8, *end = c.buf + c.len;
+        int lb2 = (5100 - 118 + 7) / 8, line = 0, dots = 0, dx = -1, dy = -1;
+        uint8_t *cur = calloc(1, lb2);
+        while (p < end && *p >= '0' && *p <= '9') {
+            int n = 0;
+            while (*p >= '0' && *p <= '9')
+                n = n * 10 + (*p++ - '0');
+            if (*p++ != 'w')
+                break;
+            const uint8_t *q = p + 2;
+            for (int i = 0; i < p[1]; i++, line++) {
+                q += br_decode_line(q, p + n, cur, lb2);
+                for (int x = 0; x < lb2 * 8; x++)
+                    if (cur[x >> 3] & (0x80 >> (x & 7))) {
+                        if (!dots++)
+                            dx = x, dy = line;
+                    }
+            }
+            p += n;
+        }
+        free(cur);
+        free(c.buf);
+        CHECK(dx == 300 - 118 && dy == 500 - 118 && dots == sc * sc, "brother: origin at %d dpi: first dot (%d, %d) of %d, expected (182, 382) of %d",
+              dpi, dx, dy, dots, sc * sc);
+    }
+
+    // a 300 dpi job is the same page doubled at 600 dpi (RGB, a ragged
+    // right edge, NULL lines)
+    {
+        br_capture_t a = {0}, b = {0};
+        enum { SW = 2400, SH = 3508 };
+        uint8_t *row = malloc(SW * 3), *row2 = malloc(SW * 6);
+        for (int pass = 0; pass < 2; pass++) {
+            printer_io_t pio = {.write = br_capture, .ctx = pass ? &b : &a};
+            int dpi = pass ? 600 : 300, sc = pass ? 2 : 1;
+            void *job = d->job_begin(d, &pio, dpi, 0);
+            d->page_begin(job, SW * sc, SH * sc, 3);
+            for (int y = 0; y < SH; y++) {
+                bool blank = (y / 100) % 5 == 4;
+                for (int x = 0; x < SW; x++)
+                    for (int c = 0; c < 3; c++)
+                        row[3 * x + c] = (uint8_t)((x * 7 + y * 3 + c * 50) % 256);
+                for (int x = 0; x < SW * 2; x++)
+                    memcpy(row2 + 3 * x, row + 3 * (x / 2), 3);
+                for (int k = 0; k < sc; k++)
+                    d->page_line(job, y * sc + k, blank ? NULL : (pass ? row2 : row));
+            }
+            d->page_end(job);
+            d->job_end(job);
+        }
+        CHECK(a.len > 1000 && a.len == b.len && !memcmp(a.buf, b.buf, a.len), "brother: 300 dpi = doubled 600 dpi (%zu, %zu bytes)",
+              a.len, b.len);
+        free(row);
+        free(row2);
+        free(a.buf);
+        free(b.buf);
+    }
 }
 
 int main(int argc, char **argv)

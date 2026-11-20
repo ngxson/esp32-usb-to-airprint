@@ -123,3 +123,5 @@ Each printer model is a driver in `components/printers/`, listed in `printers.c`
 MIT, see [LICENSE](LICENSE).
 
 The printer and scanner protocols follow [Gutenprint](https://gimp-print.sourceforge.io/) and [SANE](http://www.sane-project.org/)'s pixma backend. The JPEG encoder's DCT is a translation of libjpeg's `jfdctint.c`: this software is based in part on the work of the Independent JPEG Group. The web UI bundles [Svelte](https://svelte.dev/) (MIT) and [pdf.js](https://mozilla.github.io/pdf.js/) (Apache-2.0).
+
+The Kyocera driver (`components/printers/kyocera_kpsl.c`) is a port of [rastertokpsl-re](https://github.com/sv99/rastertokpsl-re), copyright 2015 svolkov, Apache-2.0 ([license](components/printers/LICENSE.rastertokpsl-re)). It compresses with [JBIG-KIT](https://www.cl.cam.ac.uk/~mgk25/jbigkit/) (`components/printers/jbig/`), copyright 1995-2014 Markus Kuhn, GPL-2.0-or-later ([license](components/printers/jbig/COPYING)): a firmware built with it is distributed under the GPL, and its source is this repository.

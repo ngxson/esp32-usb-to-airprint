@@ -43,5 +43,8 @@ oled_host: oled_host.c $(OLED) ../components/oled/include/*.h ../components/airp
 kpsl_host: kpsl_host.c $(BJL) $(PRINTERS) ../components/airprint/printer_driver.c
 	$(CC) $(CFLAGS) -Wno-deprecated-declarations $(INC) kpsl_host.c $(BJL) $(PRINTERS) ../components/airprint/printer_driver.c -lcups -lm -o $@
 
+# the headers $(PRINTERS) build with
+bjl_host airprint_host kpsl_host: ../components/printers/jbig/*.h ../components/airprint/include/printer_driver.h
+
 clean:
 	rm -rf bjl_host airprint_host scan_host oled_host kpsl_host out *.prn *.png *.raw

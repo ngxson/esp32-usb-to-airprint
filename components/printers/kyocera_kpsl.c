@@ -1,7 +1,7 @@
 // Kyocera FS-1040: a GDI printer speaking KPSL. The host renders; the printer
-// takes 1-bit bands of 256 lines, JBIG-compressed (jbig/: JBIG-KIT, GPL-2.0+).
-// The stream is the one rastertokpsl-re (https://github.com/sv99/rastertokpsl-re,
-// Apache-2.0, a reverse engineering of Kyocera's macOS filter) writes with its
+// takes 1-bit bands of 256 lines, JBIG-compressed (jbig/: JBIG-KIT, GPL-2.0+,
+// jbig/COPYING). The stream is the one rastertokpsl-re (https://github.com/sv99/rastertokpsl-re,
+// Apache-2.0, LICENSE.rastertokpsl-re; a reverse engineering of Kyocera's macOS filter) writes with its
 // FS-1020MFP PPD, byte for byte (host/kpsl_host.c): the PPD's imageable area,
 // Kyocera's 16x16 ordered dither and the filter's band sizes, quirks included.
 // One difference: the dither runs line by line instead of on a buffered 8-bit
@@ -151,8 +151,6 @@ static int page_begin(void *job, int src_w, int src_h, int bytes_pp)
 {
     kpsl_job_t *j = job;
     const kpsl_paper_t *pp = j->paper;
-    if (j->page_ended)
-        end_block(j, false);
     // macOS rasterises the imageable area, its size truncated to pixels
     j->left = (pp->x0 * j->dpi + 36) / 72;
     j->top = ((pp->h - pp->y1) * j->dpi + 36) / 72;
@@ -171,8 +169,10 @@ static int page_begin(void *job, int src_w, int src_h, int bytes_pp)
         free(j->band);
         free(j->out);
         j->band = j->out = NULL;
-        return -1;
+        return -1;      // page_ended stays set: job_end ends the section
     }
+    if (j->page_ended)
+        end_block(j, false);
     j->in_page = true;
 
     uint8_t h[32], *p = block(h, 'P', 3);
@@ -242,10 +242,10 @@ static void send_band(kpsl_job_t *j)
 // the next line of the imageable area from a source line (NULL: white)
 static void add_line(kpsl_job_t *j, const uint8_t *px)
 {
-    if (px) {
+    int n = j->src_w - j->left < j->width ? j->src_w - j->left : j->width;
+    if (px && n > 0) {
         uint8_t *row = j->band + (size_t)(j->y % BAND) * j->wib;
         const uint8_t *th = DITHER[j->y % 16];
-        int n = j->src_w - j->left < j->width ? j->src_w - j->left : j->width;
         const uint8_t *s = px + (size_t)j->left * j->bytes_pp;
         for (int x = 0; x < n; x++, s += j->bytes_pp) {
             int g = j->bytes_pp == 3 ? (s[0] * 77 + s[1] * 150 + s[2] * 29) >> 8 : s[0];
@@ -306,12 +306,14 @@ static const printer_paper_t PAPERS[] = {
     {"Letter", "na_letter_8.5x11in", 21590, 27940},
 };
 
-// Matched by name. A real one reports USB 0482:0493, CID:KY_KPSL_MonoPersonal.
+// Matched by USB id, or by name (CID:KY_KPSL_MonoPersonal on a real one)
 const printer_driver_t kyocera_fs1040_driver = {
     .id = "kyocera-fs1040",
     .make_model = "Kyocera FS-1040",
     .usb_mfg = "Kyocera",
     .usb_mdl = "FS-1040",
+    .usb_vid = 0x0482,
+    .usb_pid = 0x0493,
     .color = false,
     .scanner = false,
     .resolutions = {600},

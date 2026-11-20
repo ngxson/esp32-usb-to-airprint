@@ -29,32 +29,53 @@ int main(int argc, char **argv)
     cups_page_header2_t h;
     printer_io_t io = {.write = out};
     void *job = NULL;
-    while (cupsRasterReadHeader2(ras, &h)) {
+    uint8_t *k = NULL, *gray = NULL;
+    int err = 0;
+    while (!err && cupsRasterReadHeader2(ras, &h)) {
         int dpi = h.HWResolution[0];
         int src_w = PAGE[paper][0] * dpi / 72 + 1, src_h = PAGE[paper][1] * dpi / 72 + 1;
         int left = (PAGE[paper][2] * dpi + 36) / 72, top = (PAGE[paper][3] * dpi + 36) / 72;
-        if (!job)
-            job = d->job_begin(d, &io, dpi, paper);
-        if (d->page_begin(job, src_w, src_h, 1))
-            return 1;
-        uint8_t *k = malloc(h.cupsBytesPerLine), *gray = malloc(src_w);
-        for (int y = 0; y < src_h; y++) {
+        if (h.cupsBitsPerPixel != 8 || left + h.cupsWidth > (unsigned)src_w || top + h.cupsHeight > (unsigned)src_h) {
+            fprintf(stderr, "kpsl_host: a %ux%u, %u-bit raster is not the %s PPD's\n", h.cupsWidth, h.cupsHeight,
+                    h.cupsBitsPerPixel, paper ? "Letter" : "A4");
+            err = 1;
+            break;
+        }
+        if (!job && !(job = d->job_begin(d, &io, dpi, paper))) {
+            err = 1;
+            break;
+        }
+        free(k);
+        free(gray);
+        k = malloc(h.cupsBytesPerLine);
+        gray = malloc(src_w);
+        if (!k || !gray || d->page_begin(job, src_w, src_h, 1)) {
+            err = 1;
+            break;
+        }
+        for (int y = 0; y < src_h && !err; y++) {
             const uint8_t *px = NULL;
             if (y >= top && y < top + (int)h.cupsHeight) {
-                cupsRasterReadPixels(ras, k, h.cupsBytesPerLine);
+                if (cupsRasterReadPixels(ras, k, h.cupsBytesPerLine) != h.cupsBytesPerLine) {
+                    fprintf(stderr, "kpsl_host: the raster ends within a page\n");
+                    err = 1;
+                    break;
+                }
                 memset(gray, 255, src_w);
                 for (unsigned x = 0; x < h.cupsWidth; x++)
                     gray[left + x] = 255 - k[x];
                 px = gray;
             }
-            if (d->page_line(job, y, px))
-                return 1;
+            err = d->page_line(job, y, px) != 0;
         }
-        free(k);
-        free(gray);
-        if (d->page_end(job))
-            return 1;
+        if (!err)
+            err = d->page_end(job) != 0;
     }
+    free(k);
+    free(gray);
     cupsRasterClose(ras);
-    return job && d->job_end(job) ? 1 : 0;
+    // after an error too: the driver ends the page and the job
+    if (job && d->job_end(job))
+        err = 1;
+    return err;
 }

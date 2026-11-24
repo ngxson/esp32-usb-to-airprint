@@ -21,8 +21,11 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 QEMU=${QEMU_XTENSA:-qemu-system-xtensa}
 PY=~/.platformio/penv/bin/python
-# PlatformIO installed some other way (e.g. Homebrew): the Python that runs pio
-[ -x "$PY" ] || PY=$(head -1 "$(command -v pio)" | sed 's/^#! *//')
+# PlatformIO installed some other way (Homebrew, pipx): ask it which Python
+# runs it (its launcher's first line need not name it: #!/bin/sh for a path
+# with spaces)
+[ -x "$PY" ] || PY=$(pio system info --json-output |
+    python3 -c 'import json, sys; print(json.load(sys.stdin)["python_exe"]["value"])')
 ESPTOOL=~/.platformio/packages/tool-esptoolpy/esptool.py
 B=.pio/build/qemu
 OUT=$(mktemp -d)
@@ -31,7 +34,7 @@ pio run -e qemu >/dev/null
 make -C host -s
 # app offset = first app partition in partitions.csv
 APP_OFS=$(awk -F, '$2 ~ /app/ {gsub(/ /, "", $4); print $4; exit}' partitions.csv)
-$PY $ESPTOOL --chip esp32s3 merge_bin --fill-flash-size 16MB -o "$OUT/flash.bin" \
+"$PY" "$ESPTOOL" --chip esp32s3 merge_bin --fill-flash-size 16MB -o "$OUT/flash.bin" \
     --flash_mode dio --flash_freq 80m --flash_size 16MB \
     0x0 $B/bootloader.bin 0x8000 $B/partitions.bin $APP_OFS $B/firmware.bin >/dev/null
 

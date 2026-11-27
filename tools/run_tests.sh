@@ -18,7 +18,10 @@ OUT=$(cd $OUT && pwd)
 echo "== host unit tests"
 make -C host -s
 host/bjl_host selftest
+host/ufr2_host selftest | tail -1
 host/scan_host selftest 2>/dev/null | tail -1
+tools/test_scan_drivers.sh
+python3 tools/test_docs.py
 host/oled_host selftest
 
 echo "== status screen (all screens in $OUT/oled.png)"

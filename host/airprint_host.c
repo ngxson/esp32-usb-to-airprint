@@ -15,6 +15,7 @@
 #include "airprint.h"
 #include "events.h"
 #include "printer_driver.h"
+#include "fake_iclass.h"
 #include "fake_scanner.h"
 #include "oled_ui.h"
 #include "scan_service.h"
@@ -75,8 +76,20 @@ static void identify(void *ctx)
     fprintf(stderr, "host: identify (LED would blink)\n");
 }
 
-// --- emulated scanner
+// --- emulated scanner: the driver's kind (a PIXMA, or an imageCLASS for canon-mf220)
 static fake_scanner_t s_scanner;
+static fake_iclass_t s_iclass;
+static const printer_driver_t *s_driver;
+
+static bool scan_available(void *ctx)
+{
+    return s_driver->scanner != PRINTER_SCANNER_NONE;
+}
+
+static int scan_protocol(void *ctx)
+{
+    return s_driver->scanner;
+}
 
 static int scan_open(void *ctx)
 {
@@ -88,8 +101,10 @@ static int scan_open(void *ctx)
 
 static void scan_close(void *ctx)
 {
-    fprintf(stderr, "host: scanner closed (%d protocol violations%s%s)\n", s_scanner.errors,
-            s_scanner.errors ? ", first: " : "", s_scanner.error);
+    bool ic = s_driver->scanner == PRINTER_SCANNER_ICLASS;
+    int errors = ic ? s_iclass.errors : s_scanner.errors;
+    fprintf(stderr, "host: %s scanner closed (%d protocol violations%s%s)\n", ic ? "imageCLASS" : "PIXMA", errors,
+            errors ? ", first: " : "", ic ? s_iclass.error : s_scanner.error);
 }
 
 // GET /dev/oled.pbm: the device's status screen for the current state
@@ -166,9 +181,12 @@ int main(int argc, char **argv)
     if (fake_scanner_init(&s_scanner, kbps * 1024) != 0)
         return 1;
     sbuf_init(malloc(buf_kb * 1024), buf_kb * 1024);
-    static scan_config_t scfg = {.open = scan_open, .close = scan_close, .make_model = "Canon MG2500 series",
-                                 .uuid = "a4d1e9b2-0b6f-4c3e-9d2a-5e8f7c6b1a00"};
-    scfg.io = fake_scanner_io(&s_scanner);
+    s_driver = cfg.driver;
+    fake_iclass_init(&s_iclass);
+    static scan_config_t scfg = {.available = scan_available, .open = scan_open, .close = scan_close,
+                                 .protocol = scan_protocol, .uuid = "a4d1e9b2-0b6f-4c3e-9d2a-5e8f7c6b1a00"};
+    scfg.make_model = cfg.driver->make_model;
+    scfg.io = cfg.driver->scanner == PRINTER_SCANNER_ICLASS ? fake_iclass_io(&s_iclass) : fake_scanner_io(&s_scanner);
     scan_service_init(&scfg);
     fprintf(stderr, "host: scanner emulated at %u KB/s, %u KB buffer\n", kbps, (unsigned)buf_kb);
     events_add_source("printer", airprint_status_json, NULL);

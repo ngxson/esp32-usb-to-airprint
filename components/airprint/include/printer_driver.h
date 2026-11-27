@@ -20,6 +20,20 @@ extern "C" {
 
 #define PRINTER_MAX_RESOLUTIONS 4
 
+// IPP "sides"
+enum {
+    PRINTER_SIDES_ONE = 0,
+    PRINTER_SIDES_LONG_EDGE = 1,    // two-sided-long-edge
+    PRINTER_SIDES_SHORT_EDGE = 2,   // two-sided-short-edge
+};
+
+// The device's scanner, as far as the firmware can drive it (components/scanner)
+enum {
+    PRINTER_SCANNER_NONE = 0,
+    PRINTER_SCANNER_PIXMA = 1,      // Canon PIXMA (pixma_scan.h)
+    PRINTER_SCANNER_ICLASS = 2,     // Canon imageCLASS / i-SENSYS MF, generation 2 (iclass_scan.h)
+};
+
 // Where the printer data goes. Set up by the caller of job_begin/test_page.
 typedef struct {
     // the printer's bytes, in order; < 0 aborts the job
@@ -46,7 +60,9 @@ typedef struct printer_driver {
     const char *usb_mdl;        // printer_driver_match recognises the device
     uint16_t usb_vid, usb_pid;  // the device's USB ids, 0 = unknown (matched by usb_mdl)
     bool color;                 // colour printing (else gray only)
-    bool scanner;               // the device has a Canon pixma scanner (components/scanner)
+    uint8_t scanner;            // PRINTER_SCANNER_*: the device's scanner protocol, NONE = no supported scanner
+    bool duplex;                // prints both sides; the client turns the back of a long-edge
+                                // sheet by 180 degrees (pwg-raster-document-sheet-back "rotated", URF DM3)
     int resolutions[PRINTER_MAX_RESOLUTIONS];   // dpi, ascending; the last is the default
     int nresolutions;
     const printer_paper_t *papers;              // the first is the default
@@ -55,8 +71,9 @@ typedef struct printer_driver {
     const void *model;          // the driver's own data (e.g. the Canon stream variant)
 
     // --- a job: pages of raster lines at one dpi on one paper.
-    // Starts the job (writes its header); NULL if out of memory.
-    void *(*job_begin)(const struct printer_driver *d, const printer_io_t *io, int dpi, int paper);
+    // Starts the job (writes its header); NULL if out of memory. sides: PRINTER_SIDES_*
+    // (two-sided only when the driver says duplex).
+    void *(*job_begin)(const struct printer_driver *d, const printer_io_t *io, int dpi, int paper, int sides);
     // A page whose source raster is src_w x src_h pixels at the job's dpi,
     // paper corner at (0, 0); bytes_pp 1 = gray, 3 = RGB. 0 = ok.
     int (*page_begin)(void *job, int src_w, int src_h, int bytes_pp);

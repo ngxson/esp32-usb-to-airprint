@@ -13,7 +13,9 @@
 #include <unistd.h>
 
 #include "events.h"
+#include "iclass_scan.h"
 #include "jpeg_enc.h"
+#include "printer_driver.h"
 #include "shared_buf.h"
 
 #ifdef ESP_PLATFORM
@@ -189,7 +191,8 @@ static void *scan_thread(void *arg)
     jpeg_enc_t *e = jpeg_enc_create(S.width, S.height, QUALITY, S.dpi, sink, NULL);
     if (e) {
         pixma_params_t p = {.dpi = S.dpi, .x = S.x, .y = S.y, .w = S.width, .h = S.height, .calibrate = !S.calibrated};
-        err = pixma_scan(&s_cfg->io, &p, on_line, e, &S.cancel);
+        bool iclass = s_cfg->protocol && s_cfg->protocol(s_cfg->ctx) == PRINTER_SCANNER_ICLASS;
+        err = (iclass ? iclass_scan : pixma_scan)(&s_cfg->io, &p, on_line, e, &S.cancel);
         // calibrating takes seconds: once, and again after a failure
         S.calibrated = err == PIXMA_OK || (err == PIXMA_ECANCELED && S.calibrated);
     }

@@ -19,6 +19,7 @@
   } from '../lib/scan.svelte';
   import { go, openPrint, openViewer, toast } from '../lib/ui.svelte';
   import { defaultPaper } from '../lib/layout';
+  import { noScannerMessage } from '../lib/scanner';
 
   const saved = (() => {
     try {
@@ -116,7 +117,7 @@
       {/if}
     </div>
     {#if device.loaded && !st?.scanner}
-      <p class="err small">No scanner: is the printer on and connected?</p>
+      <p class="err small">{noScannerMessage(device.printer?.connected, device.printer?.model)}</p>
     {:else if printerBusy}
       <p class="muted small">The printer is printing; scan when it is done.</p>
     {/if}

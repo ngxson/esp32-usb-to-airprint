@@ -51,6 +51,8 @@ static void show_idle_state(void)
         return;
     if (s_busy || s_airprint_busy)
         status_led_set(LED_BUSY);
+    else if (!wifi_connected())
+        status_led_set(LED_NO_WIFI);
     else
         status_led_set(usb_printer_connected() ? LED_READY : LED_WAITING);
 }
@@ -186,8 +188,10 @@ static void button_task(void *arg)
     // the user button
     bool user_down = false;
     int user_same = 0;
-    while (1) {
+    for (int tick = 0;; tick++) {
         vTaskDelay(pdMS_TO_TICKS(10));
+        if (tick % 50 == 0)
+            show_idle_state();      // follows the WiFi (red until connected, then green)
         if (debounce(is_down(CONFIG_PRINT_BUTTON_GPIO) || is_down(CONFIG_PRINT_BUTTON2_GPIO), &down, &same)) {
             if (down) {
                 pressed_at = xTaskGetTickCount();
@@ -260,7 +264,7 @@ void app_main(void)
     if (debug)
         debug_log_start(64 * 1024);
     ESP_ERROR_CHECK(status_led_init());
-    status_led_set(LED_WAITING);
+    status_led_set(LED_NO_WIFI);
     oled_start(HOSTNAME);
     ESP_ERROR_CHECK(usb_printer_start(on_printer));
     xTaskCreate(button_task, "button", 3072, NULL, 5, NULL);

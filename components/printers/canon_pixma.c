@@ -52,7 +52,7 @@ static void start_job(bjl_job_t *bjl, const printer_io_t *io)
         bjl->err = -1;
 }
 
-static void *job_begin(const printer_driver_t *d, const printer_io_t *io, int dpi, int paper)
+static void *job_begin(const printer_driver_t *d, const printer_io_t *io, int dpi, int paper, int sides)
 {
     canon_job_t *j = calloc(1, sizeof(*j));
     if (!j)
@@ -236,7 +236,7 @@ static const bjl_model_id_t MODELS[BJL_MODEL_COUNT] = {
         .usb_vid = (pid) ? 0x04a9 : 0,                                                                                 \
         .usb_pid = pid,                                                                                                \
         .color = true,                                                                                                 \
-        .scanner = has_scanner,                                                                                        \
+        .scanner = (has_scanner) ? PRINTER_SCANNER_PIXMA : PRINTER_SCANNER_NONE,                                       \
         .resolutions = {300, 600},                                                                                     \
         .nresolutions = 2,                                                                                             \
         .papers = PAPERS,                                                                                              \

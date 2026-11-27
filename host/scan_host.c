@@ -2,13 +2,16 @@
 // scanner, and the JPEG encoder (decoded and compared by tools/check_jpeg.py).
 //
 //   ./scan_host selftest
+//   ./scan_host pixma | iclass [format|retry|sequence|lines|abort|pad]   one protocol's tests
 //   ./scan_host jpeg <dpi> <w> <h> <quality> out.jpg out.ppm   test page area, encoder only
 //   ./scan_host scan <dpi> <a4|letter> out.jpg out.ppm         full pipeline: protocol + encoder
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
+#include "fake_iclass.h"
 #include "fake_scanner.h"
+#include "iclass_scan.h"
 #include "jpeg_enc.h"
 #include "pixma_scan.h"
 
@@ -30,6 +33,7 @@ typedef struct {
     int dpi, x, y, w;
     int lines, mismatches;
     int stop_after;             // > 0: ask to stop after this many lines
+    int white_from;             // > 0: pixels from this x of the scan area on are white (beyond the glass)
     FILE *ppm;
     jpeg_enc_t *jpeg;
 } sink_t;
@@ -42,6 +46,8 @@ static int check_line(void *user, int y, const uint8_t *rgb)
     for (int i = 0; i < s->w; i++) {
         uint8_t ref[3];
         fake_scanner_pixel(s->dpi, s->x + i, s->y + y, ref);
+        if (s->white_from && s->x + i >= s->white_from)
+            ref[0] = ref[1] = ref[2] = 0xff;
         if (memcmp(ref, rgb + 3 * i, 3) != 0) {
             s->mismatches++;
             break;
@@ -208,10 +214,166 @@ static FILE *open_ppm(const char *path, int w, int h)
     return f;
 }
 
+// ---------------------------------------------------------------------------
+// imageCLASS (MF220 Series) protocol against fake_iclass
+
+static int iclass_run(fake_iclass_t *f, pixma_params_t p, sink_t *s, volatile bool *cancel)
+{
+    s->dpi = p.dpi;
+    s->x = p.x;
+    s->y = p.y;
+    s->w = p.w;
+    s->lines = s->mismatches = 0;
+    pixma_io_t io = fake_iclass_io(f);
+    return iclass_scan(&io, &p, check_line, s, cancel);
+}
+
+static void iclass_expect_clean(fake_iclass_t *f, const char *what)
+{
+    CHECK(!f->session_open, "%s: session left open", what);
+    CHECK(f->errors == 0, "%s: %d protocol violations, first: %s", what, f->errors, f->error);
+}
+
+// one case, or all with NULL
+static void test_iclass(const char *only)
+{
+    bool all = !only;
+    if (all || !strcmp(only, "format")) {
+        // header, lengths and checksums are checked by the emulator on a whole scan;
+        // a status reply with a bad checksum is refused
+        fake_iclass_t f;
+        fake_iclass_init(&f);
+        sink_t s = {0};
+        int r = iclass_run(&f, (pixma_params_t){.dpi = 150, .x = 10, .y = 20, .w = 333, .h = 77}, &s, NULL);
+        CHECK(r == PIXMA_OK, "format: scan: %s", pixma_strerror(r));
+        iclass_expect_clean(&f, "format");
+        fake_iclass_init(&f);
+        f.corrupt_status = 1;
+        r = iclass_run(&f, (pixma_params_t){.dpi = 150, .w = 100, .h = 10}, &s, NULL);
+        CHECK(r == PIXMA_EPROTO, "format: bad status checksum accepted: %s", pixma_strerror(r));
+        CHECK(f.errors == 0, "format: %s", f.error);
+        // a reply other than 0x0606 is an error; so is a bare "ok" where data was due
+        fake_iclass_init(&f);
+        f.fail_command = 0xdb20;
+        r = iclass_run(&f, (pixma_params_t){.dpi = 150, .w = 100, .h = 10}, &s, NULL);
+        CHECK(r == PIXMA_ECANCELED && s.lines == 0, "format: failed start session: %s", pixma_strerror(r));
+        CHECK(f.errors == 0, "format: %s", f.error);
+        fake_iclass_init(&f);
+        f.cut_command = 0xf320;
+        r = iclass_run(&f, (pixma_params_t){.dpi = 150, .w = 100, .h = 10}, &s, NULL);
+        CHECK(r == PIXMA_ECANCELED && s.lines == 0, "format: status cut short accepted: %s", pixma_strerror(r));
+    }
+    if (all || !strcmp(only, "retry")) {
+        // the first status gets no reply: asked again (SANE's step1), then the scan goes on
+        fake_iclass_t f;
+        fake_iclass_init(&f);
+        f.mute_status = 1;
+        sink_t s = {0};
+        int r = iclass_run(&f, (pixma_params_t){.dpi = 75, .w = 200, .h = 50}, &s, NULL);
+        CHECK(r == PIXMA_OK && s.lines == 50 && s.mismatches == 0, "retry: %s, %d lines", pixma_strerror(r), s.lines);
+        CHECK(!strncmp(f.order, "sSBRP0", 6), "retry: commands %s", f.order);
+        iclass_expect_clean(&f, "retry");
+    }
+    if (all || !strcmp(only, "sequence")) {
+        // status, begin, source, parameters, first request, image requests,
+        // abort, status x 2, abort again (flatbed: no paper in the ADF)
+        fake_iclass_t f;
+        fake_iclass_init(&f);
+        sink_t s = {0};
+        int r = iclass_run(&f, (pixma_params_t){.dpi = 300, .x = 64, .y = 0, .w = 1000, .h = 400}, &s, NULL);
+        CHECK(r == PIXMA_OK, "sequence: %s", pixma_strerror(r));
+        size_t n = strlen(f.order);
+        bool ok = n > 9 && !strncmp(f.order, "SBRP0I", 6) && !strcmp(f.order + n - 4, "ASSA");
+        for (size_t i = 6; ok && i < n - 4; i++)
+            ok = f.order[i] == 'I';
+        CHECK(ok, "sequence: commands %s", f.order);
+        CHECK(f.dpi == 300 && f.x == 64 && f.y == 0 && f.wx == 1024 && f.h == 400,
+              "sequence: parameters %d dpi (%d,%d) %dx%d", f.dpi, f.x, f.y, f.wx, f.h);
+        iclass_expect_clean(&f, "sequence");
+    }
+    if (all || !strcmp(only, "lines")) {
+        const pixma_params_t areas[] = {
+            {.dpi = 75, .w = 620, .h = 877},
+            {.dpi = 150, .x = 3, .y = 5, .w = 1239, .h = 1749},  // down to the bottom of the glass
+            {.dpi = 300, .x = 100, .y = 200, .w = 1001, .h = 333},
+            {.dpi = 600, .x = 1000, .y = 3000, .w = 1500, .h = 600},
+            {.dpi = 600, .x = 5090, .y = 10, .w = 6, .h = 40},     // a 6 px strip at the right edge
+        };
+        for (size_t i = 0; i < sizeof(areas) / sizeof(areas[0]); i++) {
+            fake_iclass_t f;
+            fake_iclass_init(&f);
+            f.not_ready = (int)i;       // also: blocks that are not ready yet
+            sink_t s = {0};
+            int r = iclass_run(&f, areas[i], &s, NULL);
+            CHECK(r == PIXMA_OK, "lines %d dpi: %s", areas[i].dpi, pixma_strerror(r));
+            CHECK(s.lines == areas[i].h && s.mismatches == 0, "lines %d dpi: %d of %d lines, %d wrong", areas[i].dpi,
+                  s.lines, areas[i].h, s.mismatches);
+            CHECK(f.scans == 1, "lines %d dpi: image not read whole (%llu of %llu bytes)", areas[i].dpi,
+                  (unsigned long long)f.image_bytes, (unsigned long long)f.image_total);
+            iclass_expect_clean(&f, "lines");
+        }
+    }
+    if (all || !strcmp(only, "abort")) {
+        // the consumer stops; a block fails: the session is aborted either way
+        fake_iclass_t f;
+        fake_iclass_init(&f);
+        sink_t s = {.stop_after = 50};
+        int r = iclass_run(&f, (pixma_params_t){.dpi = 300, .w = 2480, .h = 3000}, &s, NULL);
+        CHECK(r == PIXMA_ECANCELED, "abort: stop: %s", pixma_strerror(r));
+        CHECK(f.aborts >= 1, "abort: stop: session not aborted (%s)", f.order);
+        iclass_expect_clean(&f, "abort: stop");
+        volatile bool cancel = true;
+        fake_iclass_init(&f);
+        s = (sink_t){0};
+        r = iclass_run(&f, (pixma_params_t){.dpi = 150, .w = 500, .h = 500}, &s, &cancel);
+        CHECK(r == PIXMA_ECANCELED && f.aborts >= 1, "abort: cancel: %s, %d aborts", pixma_strerror(r), f.aborts);
+        iclass_expect_clean(&f, "abort: cancel");
+        fake_iclass_init(&f);
+        f.fail_at_block = 3;
+        s = (sink_t){0};
+        r = iclass_run(&f, (pixma_params_t){.dpi = 600, .w = 4000, .h = 2000}, &s, NULL);
+        CHECK(r < 0 && f.error_infos == 1 && f.aborts >= 1, "abort: failed block: %s, %d error infos, %d aborts",
+              pixma_strerror(r), f.error_infos, f.aborts);
+        iclass_expect_clean(&f, "abort: failed block");
+        // a command inside the session fails: the session is still ended
+        unsigned codes[] = {0xdd20, 0xde20};
+        for (int i = 0; i < 2; i++) {
+            fake_iclass_init(&f);
+            f.fail_command = codes[i];
+            s = (sink_t){0};
+            r = iclass_run(&f, (pixma_params_t){.dpi = 150, .w = 500, .h = 500}, &s, NULL);
+            CHECK(r < 0 && f.aborts >= 1, "abort: failed %04x: %s, %d aborts", codes[i], pixma_strerror(r), f.aborts);
+            iclass_expect_clean(&f, "abort: failed command");
+        }
+    }
+    if (all || !strcmp(only, "pad")) {
+        // Letter at 600 dpi is 5100 px wide, the glass 5096: the last columns are white
+        fake_iclass_t f;
+        fake_iclass_init(&f);
+        sink_t s = {.white_from = ICLASS_MAX_WIDTH_75 * 600 / 75};
+        int r = iclass_run(&f, (pixma_params_t){.dpi = 600, .w = 5100, .h = 64}, &s, NULL);
+        CHECK(r == PIXMA_OK, "pad: %s", pixma_strerror(r));
+        CHECK(s.lines == 64 && s.mismatches == 0, "pad: %d lines, %d wrong", s.lines, s.mismatches);
+        CHECK(f.x + f.wx <= ICLASS_MAX_WIDTH_75 * 600 / 75 + 31, "pad: asked for %d px from %d", f.wx, f.x);
+        iclass_expect_clean(&f, "pad");
+    }
+}
+
 int main(int argc, char **argv)
 {
+    if (argc >= 2 && !strcmp(argv[1], "pixma")) {
+        test_protocol();
+        printf(s_fail ? "%d FAILED\n" : "pixma: all passed\n", s_fail);
+        return s_fail ? 1 : 0;
+    }
+    if (argc >= 2 && !strcmp(argv[1], "iclass")) {
+        test_iclass(argc >= 3 ? argv[2] : NULL);
+        printf(s_fail ? "%d FAILED\n" : "iclass: all passed\n", s_fail);
+        return s_fail ? 1 : 0;
+    }
     if (argc >= 2 && !strcmp(argv[1], "selftest")) {
         test_protocol();
+        test_iclass(NULL);
         test_jpeg();
         printf(s_fail ? "%d FAILED\n" : "scanner selftest: all passed\n", s_fail);
         return s_fail != 0;

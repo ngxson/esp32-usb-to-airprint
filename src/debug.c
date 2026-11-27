@@ -22,6 +22,7 @@
 #include "esp_system.h"
 #include "esp_timer.h"
 #include "esp_wifi.h"
+#include "usb_printer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 #include "freertos/task.h"
@@ -333,6 +334,7 @@ static esp_err_t root_get(httpd_req_t *req)
                      "  POST /coredump/erase\n"
                      "  GET  /symbols[?sha=<elf sha256 prefix>]  function names of a build in flash\n"
                      "  POST /panic           crash on purpose (to try the core dump tools)\n"
+        "  POST /raw             send the body to the printer as it is (a print job made elsewhere)\n"
                      "  POST /loglevel?tag=<tag|*>&level=<none|error|warn|info>\n"
                      "tools/remote.py does all of this.\n");
 }
@@ -438,6 +440,33 @@ static const char *check_image(const uint8_t *p, size_t n)
     if (strncmp(d->project_name, esp_app_get_description()->project_name, sizeof(d->project_name)) != 0)
         return "image is from another project";
     return NULL;
+}
+
+// POST /raw: the body goes to the printer as it is (a print job made
+// elsewhere, e.g. by Canon's own driver), to tell the stream from its timing
+static esp_err_t raw_post(httpd_req_t *req)
+{
+    if (s_busy && s_busy())
+        return send_text(req, "409 Conflict", "busy printing or scanning, try again later\n");
+    if (usb_printer_job_begin() != ESP_OK)
+        return send_text(req, "503 Service Unavailable", "no printer\n");
+    uint8_t *buf = malloc(OTA_BUF_SIZE);
+    const char *err = buf ? NULL : "no memory";
+    size_t total = req->content_len, done = 0;
+    int64_t t0 = esp_timer_get_time();
+    while (!err && done < total) {
+        size_t n = total - done < OTA_BUF_SIZE ? total - done : OTA_BUF_SIZE;
+        if (recv_exact(req, buf, n) < 0)
+            err = "upload interrupted";
+        else if (usb_printer_write(buf, n) != ESP_OK)
+            err = "printer write failed";
+        done += n;
+    }
+    usb_printer_job_end();
+    free(buf);
+    ESP_LOGI(TAG, "raw job: %u bytes in %.1f s%s%s", (unsigned)done, (esp_timer_get_time() - t0) / 1e6,
+             err ? ": " : "", err ? err : "");
+    return err ? send_text(req, "500 Internal Server Error", err) : send_text(req, "200 OK", "sent\n");
 }
 
 static esp_err_t ota_post(httpd_req_t *req)
@@ -626,7 +655,7 @@ esp_err_t debug_server_start(bool (*busy)(void))
     cfg.ctrl_port = DEBUG_HTTP_PORT + 1;
     cfg.stack_size = 6144;
     cfg.max_open_sockets = 3;
-    cfg.max_uri_handlers = 12;
+    cfg.max_uri_handlers = 13;
     cfg.lru_purge_enable = true;
     cfg.recv_wait_timeout = 10;
     httpd_handle_t h;
@@ -646,6 +675,7 @@ esp_err_t debug_server_start(bool (*busy)(void))
         {.uri = "/symbols", .method = HTTP_GET, .handler = symbols_get},
         {.uri = "/loglevel", .method = HTTP_POST, .handler = loglevel_post},
         {.uri = "/panic", .method = HTTP_POST, .handler = panic_post},
+        {.uri = "/raw", .method = HTTP_POST, .handler = raw_post},
     };
     for (size_t i = 0; i < sizeof(uris) / sizeof(uris[0]); i++)
         if (httpd_register_uri_handler(h, &uris[i]) != ESP_OK)

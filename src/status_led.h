@@ -6,7 +6,8 @@
 
 typedef enum {
     LED_OFF,
-    LED_WAITING,        // solid yellow: ready, no printer attached
+    LED_NO_WIFI,        // solid red: not on the WiFi (yet)
+    LED_WAITING,        // solid green: on the WiFi, no printer attached
     LED_READY,          // solid green: printer attached
     LED_BUSY,           // blinking green: printing
     LED_ERROR,          // fast blinking red: last job failed

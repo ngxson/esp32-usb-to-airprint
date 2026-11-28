@@ -6,6 +6,7 @@
 #include "canon_bjl.h"
 #include "esp_log.h"
 #include "esp_timer.h"
+#include "nvs.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "sdkconfig.h"
@@ -13,32 +14,86 @@
 
 static const char *TAG = "print_job";
 
+#define PRINTER_NVS_NAMESPACE "printer"
+#define PRINTER_NVS_DRIVER "driver"
+
 #if CONFIG_PRINTER_RES_300
 #define TEST_PAGE_DPI 300
 #else
 #define TEST_PAGE_DPI 600
 #endif
 
+static const printer_driver_t *s_configured_driver;
+static bool s_configured_loaded;
+
 static const printer_driver_t *configured_driver(void)
 {
-    static const printer_driver_t *d;
-    if (!d) {
-        d = printer_driver_find(CONFIG_PRINTER_DRIVER);
-        if (!d) {
+    if (!s_configured_loaded) {
+        nvs_handle_t nvs;
+        esp_err_t err = nvs_open(PRINTER_NVS_NAMESPACE, NVS_READONLY, &nvs);
+        if (err == ESP_OK) {
+            char id[64];
+            size_t len = sizeof(id);
+            if (nvs_get_str(nvs, PRINTER_NVS_DRIVER, id, &len) == ESP_OK) {
+                s_configured_driver = printer_driver_find(id);
+                if (!s_configured_driver)
+                    ESP_LOGW(TAG, "saved printer driver \"%s\" is unavailable", id);
+                else
+                    ESP_LOGI(TAG, "using saved printer driver: %s (%s)",
+                             s_configured_driver->id, s_configured_driver->make_model);
+            }
+            nvs_close(nvs);
+        } else if (err == ESP_ERR_NVS_NOT_INITIALIZED) {
+            // USB enumeration may race WiFi's NVS initialization; retry next call.
+            s_configured_driver = printer_driver_find(CONFIG_PRINTER_DRIVER);
+            return s_configured_driver ? s_configured_driver : printer_drivers[0];
+        }
+        s_configured_loaded = true;
+    }
+    if (!s_configured_driver) {
+        s_configured_driver = printer_driver_find(CONFIG_PRINTER_DRIVER);
+        if (!s_configured_driver) {
             ESP_LOGE(TAG, "no printer driver \"%s\", using \"%s\"", CONFIG_PRINTER_DRIVER, printer_drivers[0]->id);
-            d = printer_drivers[0];
+            s_configured_driver = printer_drivers[0];
         }
     }
-    return d;
+    return s_configured_driver;
+}
+
+static bool remember_driver(const printer_driver_t *d)
+{
+    nvs_handle_t nvs;
+    esp_err_t err = nvs_open(PRINTER_NVS_NAMESPACE, NVS_READWRITE, &nvs);
+    if (err == ESP_OK) {
+        err = nvs_set_str(nvs, PRINTER_NVS_DRIVER, d->id);
+        if (err == ESP_OK)
+            err = nvs_commit(nvs);
+        nvs_close(nvs);
+    }
+    if (err == ESP_ERR_NVS_NOT_INITIALIZED)
+        return false;
+    if (err != ESP_OK)
+        ESP_LOGW(TAG, "cannot save printer driver %s: %s", d->id, esp_err_to_name(err));
+    if (err == ESP_OK) {
+        s_configured_driver = d;
+        s_configured_loaded = true;
+    }
+    return err == ESP_OK;
 }
 
 // the driver of the last printer plugged in, NULL if it had none
 static const printer_driver_t *volatile s_attached;
+static volatile bool s_attached_saved;
 
 const printer_driver_t *print_job_driver(void)
 {
     const printer_driver_t *d = s_attached;
-    return d ? d : configured_driver();
+    if (d) {
+        if (!s_attached_saved)
+            s_attached_saved = remember_driver(d);  // retry if USB beat WiFi's NVS init
+        return d;
+    }
+    return configured_driver();
 }
 
 bool print_job_set_printer(const usb_printer_info_t *info)
@@ -46,9 +101,10 @@ bool print_job_set_printer(const usb_printer_info_t *info)
     const printer_driver_t *before = print_job_driver();
     const printer_driver_t *d = printer_driver_match(info->vid, info->pid, info->device_id);
     s_attached = d;
-    if (d)
+    if (d) {
         ESP_LOGI(TAG, "printer %04x:%04x: driver %s (%s)", info->vid, info->pid, d->id, d->make_model);
-    else
+        s_attached_saved = false;
+    } else
         ESP_LOGW(TAG, "printer %04x:%04x \"%s\" is not a model the firmware knows: using the \"%s\" driver anyway",
                  info->vid, info->pid, info->product, print_job_driver()->id);
     return print_job_driver() != before;
@@ -70,6 +126,8 @@ int print_job_sync(const char *what)
     static bool s_start_answered;
     if (usb_printer_flush() != ESP_OK)
         return -1;
+    if (!what)
+        return 0;   // transport flush only (UFR II has no IVEC replies)
     bool end = strcmp(what, "EndJob") == 0;
     uint32_t timeout = !end ? 5000 : s_start_answered ? 180000 : 5000;
     esp_err_t err = usb_printer_wait_response(what, timeout);

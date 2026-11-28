@@ -48,8 +48,11 @@ static void led_task(void *arg)
         last = st;
         uint32_t period_ms = 500;
         switch (st) {
+        case LED_NO_WIFI:
+            led_write(255, 0, 0);
+            break;
         case LED_WAITING:
-            led_write(255, 180, 0);
+            led_write(0, 255, 0);
             break;
         case LED_READY:
             led_write(0, 255, 0);

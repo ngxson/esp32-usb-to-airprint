@@ -24,7 +24,8 @@ void printer_driver_urf(const printer_driver_t *d, char *buf, size_t n)
         snprintf(rs, sizeof(rs), "%d", lo);
     else
         snprintf(rs, sizeof(rs), "%d-%d", lo, hi);
-    snprintf(buf, n, "V1.4,CP1,W8%s,RS%s,MT1,PQ3-4-5", d->color ? ",SRGB24" : "", rs);
+    // DM3: two-sided, the client rotates the back of a long-edge sheet
+    snprintf(buf, n, "V1.4,CP1,%sW8%s,RS%s,MT1,PQ3-4-5", d->duplex ? "DM3," : "", d->color ? ",SRGB24" : "", rs);
 }
 
 bool printer_driver_has_dpi(const printer_driver_t *d, int dpi)

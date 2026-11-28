@@ -5,10 +5,14 @@
   import Lightbulb from '@lucide/svelte/icons/lightbulb';
   import CircleStop from '@lucide/svelte/icons/circle-stop';
   import CircleAlert from '@lucide/svelte/icons/circle-alert';
+  import FileCheck from '@lucide/svelte/icons/file-check';
   import { device, type Job, type Supply } from '../lib/device.svelte';
   import { cancelJob, identifyPrinter, statusOk, statusText } from '../lib/ipp';
   import { addFile, formatSize, isSupported } from '../lib/files.svelte';
   import { openPrint, pickFiles, toast } from '../lib/ui.svelte';
+  import { renderJob, sendJob } from '../lib/print';
+  import { testPageSource } from '../lib/testpage';
+  import { defaultPaper } from '../lib/layout';
 
   const p = $derived(device.printer);
   const active = $derived(p?.jobs.find((j) => j.id === p.active && (j.state === 'processing' || j.state === 'pending')));
@@ -80,6 +84,35 @@
     }
   }
 
+  let testing = $state(false);
+
+  // a page drawn in the browser, printed like any document
+  async function testPage() {
+    testing = true;
+    try {
+      const paper = defaultPaper();
+      const info = [
+        `Printer: ${p?.name || ''}`,
+        `Model: ${p?.model || ''}`,
+        `Printed from ${location.host} on ${new Date().toLocaleString()}`,
+        'A4, 600 dpi, gray. The frame is 5 mm inside the sheet.',
+      ];
+      const signal = new AbortController().signal;
+      const doc = await renderJob(
+        testPageSource(paper, info),
+        { paper, fit: 'actual', orientation: 'portrait', pages: [0], copies: 1, gray: true, dpi: 600 },
+        () => {},
+        signal,
+      );
+      await sendJob(doc, 'Test page', () => {}, signal);
+      toast('Test page printed', 'ok');
+    } catch (e) {
+      toast(`Test page failed: ${(e as Error).message}`, 'error');
+    } finally {
+      testing = false;
+    }
+  }
+
   async function identify() {
     try {
       await identifyPrinter();
@@ -114,6 +147,9 @@
           <Upload size={17} /> Upload &amp; print
         </button>
         <button class="btn" onclick={chooseFile} disabled={!p?.connected}><FolderOpen size={17} /> Print from Files</button>
+        <button class="btn" onclick={testPage} disabled={!p?.connected || testing}>
+          <FileCheck size={17} /> {testing ? 'Printing…' : 'Print test page'}
+        </button>
         <button class="btn ghost" onclick={identify} disabled={!device.online}><Lightbulb size={17} /> Identify</button>
       </div>
       <input bind:this={input} type="file" accept="application/pdf,image/*" hidden onchange={upload} />

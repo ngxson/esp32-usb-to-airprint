@@ -283,7 +283,9 @@ static int cmd_selftest(void)
     CHECK(printer_driver_find("canon-mg2500"), "canon-mg2500 driver");
     for (int k = 0; printer_drivers[k]; k++) {
         const printer_driver_t *d = printer_drivers[k];
-        CHECK(d->test_page && d->model, "%s: test page", d->id);
+        if (!d->model)
+            continue;   // not a canon_bjl printer (canon_ufr2.c: ufr2_host)
+        CHECK(d->test_page, "%s: test page", d->id);
         for (int i = 0; d->test_page && d->model && i < d->nresolutions; i++) {
             int dpi = d->resolutions[i];
             uint32_t want = 0, got = 0;
@@ -310,6 +312,23 @@ static int cmd_selftest(void)
         }
     }
 
+    // each driver's scanner protocol
+    {
+        static const struct {
+            const char *id;
+            int scanner;
+        } kinds[] = {
+            {"canon-mf220", PRINTER_SCANNER_ICLASS}, {"canon-mg2500", PRINTER_SCANNER_PIXMA},
+            {"canon-mx420", PRINTER_SCANNER_PIXMA},  {"canon-p200", PRINTER_SCANNER_NONE},
+            {"canon-ip2700", PRINTER_SCANNER_NONE},
+        };
+        for (size_t i = 0; i < sizeof(kinds) / sizeof(kinds[0]); i++) {
+            const printer_driver_t *d = printer_driver_find(kinds[i].id);
+            CHECK(d && d->scanner == kinds[i].scanner, "%s: scanner kind %d, expected %d", kinds[i].id,
+                  d ? d->scanner : -1, kinds[i].scanner);
+        }
+    }
+
     // the firmware's choice of driver for the attached printer
     {
         static const struct {
@@ -323,6 +342,7 @@ static int cmd_selftest(void)
             {0x04a9, 0x1234, "MANUFACTURER:Canon;MODEL:iP2800 series;", "canon-ip2800"},
             {0x04a9, 0x1234, "MFG:Canon;MDL:P200;", "canon-p200"},            // " series" optional
             {0x04a9, 0x1234, "MFG:Canon; MDL:mg2900 Series;", "canon-mg2900"},
+            {0x04a9, 0x1234, "MFG:Canon;MDL:MF220 Series;CMD:LIPSLX,CPCA;CLS:PRINTER;", "canon-mf220"},  // MF221d
             {0x04a9, 0x1234, "MFG:Canon;MDL:MG3600 series;", NULL},           // not supported
             {0x03f0, 0x1234, "MFG:HP;MDL:iP2700 series;", NULL},              // another maker
             {0x04a9, 0x1234, "MFG:Canon;MDL:iP2700 series XL;", NULL},

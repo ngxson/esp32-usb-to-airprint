@@ -40,6 +40,8 @@ typedef struct {
     int (*open)(void *ctx);             // claim the device for a scan, 0 = ok
     void (*close)(void *ctx);
     pixma_io_t io;                      // bulk transfers to the scanner interface
+    int (*protocol)(void *ctx);         // PRINTER_SCANNER_* of the attached device, asked
+                                        // for each scan; NULL = PRINTER_SCANNER_PIXMA
     void (*state)(void *ctx, bool scanning);    // e.g. LED
     const char *make_model;             // eSCL MakeAndModel, e.g. "Canon MG2500 series"
     const char *uuid;                   // eSCL UUID (the printer's, so clients pair them)

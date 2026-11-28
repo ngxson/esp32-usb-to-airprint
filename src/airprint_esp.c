@@ -204,7 +204,7 @@ static int dev_job_write(void *ctx, const uint8_t *data, size_t len)
 
 static int dev_job_sync(void *ctx, const char *what)
 {
-    ESP_LOGI(TAG, "dev: %s (would wait for the printer here)", what);
+    ESP_LOGI(TAG, "dev: %s (would sync with the printer here)", what ? what : "flush");
     return 0;
 }
 
@@ -269,6 +269,11 @@ static void dev_scan_close(void *ctx)
 static bool scan_available(void *ctx)
 {
     return print_job_driver()->scanner && usb_scanner_present();
+}
+
+static int scan_protocol(void *ctx)
+{
+    return print_job_driver()->scanner;
 }
 
 static int scan_open(void *ctx)
@@ -348,7 +353,7 @@ static esp_err_t announce(const char *hostname)
         {"URF", urf},
         {"UUID", s_uuid},
         {"Color", drv->color ? "T" : "F"},
-        {"Duplex", "F"},
+        {"Duplex", drv->duplex ? "T" : "F"},
         {"Copies", "F"},
         {"kind", "document"},
         {"PaperMax", "<legal-A4"},     // up to A4
@@ -471,6 +476,7 @@ esp_err_t airprint_esp_start(const char *hostname, void (*on_job_state)(bool pri
         .open = scan_open,
         .close = scan_close,
         .io = {.write = scan_write, .read = scan_read, .sleep_ms = scan_sleep},
+        .protocol = scan_protocol,
         .state = job_state,
         .uuid = s_uuid,
     };
@@ -488,6 +494,7 @@ esp_err_t airprint_esp_start(const char *hostname, void (*on_job_state)(bool pri
         s_cfg.http_handler = dev_http;
         if (fake_scanner_init(&s_fake_scanner, DEV_SCANNER_RATE) == 0) {
             s_scan_cfg.available = dev_scan_available;
+        s_scan_cfg.protocol = NULL;     // the emulated scanner is a PIXMA
             s_scan_cfg.open = dev_scan_open;
             s_scan_cfg.close = dev_scan_close;
             s_scan_cfg.io = fake_scanner_io(&s_fake_scanner);

@@ -68,6 +68,7 @@ typedef struct {
     char name[64];
     char user[32];
     char format[64];
+    int sides;                  // PRINTER_SIDES_*
     const char *reason;         // job-state-reasons keyword
     time_t created, processing, completed;
     int impressions;
@@ -745,7 +746,7 @@ static void add_printer_attrs(ipp_out_t *o, const conn_t *c, const filter_t *f)
     if (W("pwg-raster-document-resolution-supported"))
         resolutions(o, "pwg-raster-document-resolution-supported");
     if (W("pwg-raster-document-sheet-back"))
-        ipp_out_str(o, IPP_TAG_KEYWORD, "pwg-raster-document-sheet-back", "normal");
+        ipp_out_str(o, IPP_TAG_KEYWORD, "pwg-raster-document-sheet-back", drv->duplex ? "rotated" : "normal");
     if (W("pwg-raster-document-type-supported"))
         ipp_out_strs(o, IPP_TAG_KEYWORD, "pwg-raster-document-type-supported",
                      drv->color ? (const char *[]){"sgray_8", "srgb_8", NULL} : (const char *[]){"sgray_8", NULL});
@@ -754,7 +755,9 @@ static void add_printer_attrs(ipp_out_t *o, const conn_t *c, const filter_t *f)
     if (W("sides-default"))
         ipp_out_str(o, IPP_TAG_KEYWORD, "sides-default", "one-sided");
     if (W("sides-supported"))
-        ipp_out_str(o, IPP_TAG_KEYWORD, "sides-supported", "one-sided");
+        ipp_out_strs(o, IPP_TAG_KEYWORD, "sides-supported",
+                     drv->duplex ? (const char *[]){"one-sided", "two-sided-long-edge", "two-sided-short-edge", NULL}
+                                 : (const char *[]){"one-sided", NULL});
     if (W("uri-authentication-supported"))
         ipp_out_str(o, IPP_TAG_KEYWORD, "uri-authentication-supported", "none");
     if (W("uri-security-supported"))
@@ -884,6 +887,12 @@ static job_t *job_create(const ipp_request_t *req)
     j->created = time(NULL);
     ipp_attr_str(ipp_find(req, IPP_TAG_OPERATION, "job-name"), j->name, sizeof(j->name));
     ipp_attr_str(ipp_find(req, IPP_TAG_OPERATION, "requesting-user-name"), j->user, sizeof(j->user));
+    char sides[32] = "";
+    ipp_attr_str(ipp_find(req, IPP_TAG_JOB, "sides"), sides, sizeof(sides));
+    if (s_cfg->driver->duplex)      // else one-sided, whatever was asked
+        j->sides = !strcmp(sides, "two-sided-long-edge")    ? PRINTER_SIDES_LONG_EDGE
+                   : !strcmp(sides, "two-sided-short-edge") ? PRINTER_SIDES_SHORT_EDGE
+                                                            : PRINTER_SIDES_ONE;
     s_active = j;
     return j;
 }
@@ -897,6 +906,7 @@ typedef struct {
     int64_t render_us;          // time spent converting lines (render + dither + compress)
     uint32_t bytes_out;         // printer data so far
     printer_io_t io;
+    const printer_driver_t *driver; // owns drv_job, even if another printer attaches
     void *drv_job;              // the driver's job, once the first page started
     int dpi;
     int err;                    // first failure, an IPP status
@@ -920,9 +930,14 @@ static int pipe_sync(void *ctx, const char *what)
 static int pipe_page_begin(void *user, const raster_page_t *pg)
 {
     pipe_t *p = user;
-    const printer_driver_t *d = s_cfg->driver;
+    const printer_driver_t *d = p->drv_job ? p->driver : s_cfg->driver;
     if (p->job->cancel)
         return 1;
+    if (p->job->sides != PRINTER_SIDES_ONE && !d->duplex) {
+        LOGW("job %d: the attached printer no longer supports duplex", p->job->id);
+        p->err = IPP_ATTRIBUTES_NOT_SUPPORTED;
+        return 2;
+    }
     if (!printer_driver_has_dpi(d, pg->dpi)) {
         LOGW("page %d: unsupported resolution %d dpi", pg->page, pg->dpi);
         p->err = IPP_DOCUMENT_FORMAT_ERROR;
@@ -932,8 +947,11 @@ static int pipe_page_begin(void *user, const raster_page_t *pg)
         int paper = printer_driver_paper_for(d, pg->height, pg->dpi);
         p->io = (printer_io_t){.write = pipe_write, .sync = pipe_sync, .ctx = p};
         p->dpi = pg->dpi;
-        LOGI("job %d: %s %d dpi, %s", p->job->id, d->papers[paper].name, pg->dpi, pg->bytes_pp == 3 ? "color" : "gray");
-        p->drv_job = d->job_begin(d, &p->io, pg->dpi, paper);
+        static const char *const SIDES[] = {"one-sided", "two-sided long edge", "two-sided short edge"};
+        LOGI("job %d: %s %d dpi, %s, %s", p->job->id, d->papers[paper].name, pg->dpi,
+             pg->bytes_pp == 3 ? "color" : "gray", SIDES[p->job->sides]);
+        p->driver = d;
+        p->drv_job = d->job_begin(d, &p->io, pg->dpi, paper, p->job->sides);
         if (!p->drv_job) {
             p->err = IPP_INTERNAL_ERROR;
             return 3;
@@ -958,7 +976,7 @@ static int pipe_line(void *user, int y, const uint8_t *px)
         vTaskDelay(1);      // let the idle task run (task watchdog)
 #endif
     int64_t t0 = now_us();
-    int r = s_cfg->driver->page_line(p->drv_job, y, px) ? 4 : 0;
+    int r = p->driver->page_line(p->drv_job, y, px) ? 4 : 0;
     p->render_us += now_us() - t0;
     p->job->line = y + 1;
     return r;
@@ -967,7 +985,7 @@ static int pipe_line(void *user, int y, const uint8_t *px)
 static int pipe_page_end(void *user, const raster_page_t *pg)
 {
     pipe_t *p = user;
-    if (s_cfg->driver->page_end(p->drv_job))
+    if (p->driver->page_end(p->drv_job))
         return 4;
     pthread_mutex_lock(&s_lock);
     p->job->impressions++;
@@ -1010,9 +1028,9 @@ static int print_document(conn_t *c, job_t *j)
     raster_cb_t cb = {pipe_page_begin, pipe_line, pipe_page_end};
     int64_t t_start = now_us();
     int r = raster_decode(doc_read, &rd, &cb, p);
-    if (p->drv_job && s_cfg->driver->job_stats) {
+    if (p->drv_job && p->driver->job_stats) {
         char stats[160];
-        s_cfg->driver->job_stats(p->drv_job, stats, sizeof(stats));
+        p->driver->job_stats(p->drv_job, stats, sizeof(stats));
         if (stats[0])
             LOGI("job %d: %s", j->id, stats);
     }
@@ -1023,12 +1041,12 @@ static int print_document(conn_t *c, job_t *j)
          (p->render_us - p->out_us) / 1e6, (t_total - rd.wait_us - p->render_us) / 1e6);
 
     bool canceled = j->cancel;
-    bool ok = r > 0 && !canceled;
+    bool ok = r > 0 && !canceled && !p->err;
     bool link_ok = true;
     if (p->drv_job) {
         // the driver finishes the job whatever happened (cancel, bad data,
         // client gone): a partly printed sheet is ejected
-        link_ok = s_cfg->driver->job_end(p->drv_job) == 0;
+        link_ok = p->driver->job_end(p->drv_job) == 0;
         if (!link_ok)
             ok = false;
     }

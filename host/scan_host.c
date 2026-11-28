@@ -271,7 +271,8 @@ static bool test_iclass(const char *only)
         fake_iclass_init(&f);
         f.fail_command = 0xdb20;
         r = iclass_run(&f, (pixma_params_t){.dpi = 150, .w = 100, .h = 10}, &s, NULL);
-        CHECK(r == PIXMA_ECANCELED && s.lines == 0, "format: failed start session: %s", pixma_strerror(r));
+        CHECK(r == PIXMA_ECANCELED && s.lines == 0 && !f.aborts,
+              "format: rejected start session: %s, aborts %d", pixma_strerror(r), f.aborts);
         CHECK(f.errors == 0, "format: %s", f.error);
         fake_iclass_init(&f);
         f.cut_command = 0xf320;
@@ -427,7 +428,9 @@ static bool test_iclass(const char *only)
               "cleanup: abort failures hidden: %s, session %d", pixma_strerror(r), f.session_open);
         CHECK(f.errors == 0, "cleanup: %s", f.error);
         s = (sink_t){0};
+        size_t before_busy = strlen(f.order);
         r = iclass_run(&f, p, &s, NULL);
+        CHECK(!strcmp(f.order + before_busy, "SB"), "cleanup: rejected busy start was aborted: %s", f.order + before_busy);
         CHECK(r == PIXMA_EBUSY && s.lines == 0 && f.session_open,
               "cleanup: open session was reused: %s, %d lines", pixma_strerror(r), s.lines);
         CHECK(f.errors == 0, "cleanup repeat: %s", f.error);
@@ -466,9 +469,33 @@ static bool test_iclass(const char *only)
         fake_iclass_init(&f);
         f.fail_start_write = true;
         r = iclass_run(&f, p, &s, NULL);
-        CHECK(r == PIXMA_EIO && !f.aborts && !f.session_open,
+        CHECK(r == PIXMA_EIO && f.aborts > 0 && !f.session_open,
               "guards: failed start write: %s, aborts %d", pixma_strerror(r), f.aborts);
         iclass_expect_clean(&f, "guards: start write failed");
+
+        // Transport error codes do not prove that START_SESSION was rejected.
+        const int ambiguous[] = {PIXMA_EIO, PIXMA_ETIMEDOUT, PIXMA_EBUSY, PIXMA_ECANCELED};
+        for (int read_error = 0; read_error < 2; read_error++) {
+            for (size_t i = 0; i < sizeof(ambiguous) / sizeof(ambiguous[0]); i++) {
+                // A lone read timeout is retried, so use the lost-reply test above for that case.
+                if (read_error && ambiguous[i] == PIXMA_ETIMEDOUT)
+                    continue;
+                fake_iclass_init(&f);
+                if (read_error)
+                    f.start_reply_error = ambiguous[i];
+                else
+                    f.accepted_start_write_error = ambiguous[i];
+                r = iclass_run(&f, p, &s, NULL);
+                CHECK(r == ambiguous[i] && f.aborts > 0 && !f.session_open,
+                      "guards: accepted start %s error %d: %s, aborts %d, open %d",
+                      read_error ? "read" : "write", ambiguous[i], pixma_strerror(r), f.aborts, f.session_open);
+                iclass_expect_clean(&f, "guards: ambiguous start error");
+                r = iclass_run(&f, p, &s, NULL);
+                CHECK(r == PIXMA_OK && s.lines == 10,
+                      "guards: scan after ambiguous start error: %s", pixma_strerror(r));
+                iclass_expect_clean(&f, "guards: scan after ambiguous error");
+            }
+        }
 
         fake_iclass_init(&f);
         f.first_block_data = true;

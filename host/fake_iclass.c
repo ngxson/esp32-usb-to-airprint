@@ -223,6 +223,8 @@ static void command(fake_iclass_t *f, const uint8_t *d, size_t len)
         f->raw_left = 0;
         f->blocks = 0;
         reply(f, 0x0606, 0);
+        f->pending_read_error = f->start_reply_error;
+        f->start_reply_error = 0;
         if (f->mute_start) {
             f->mute_start = false;
             f->resp_len = 0;
@@ -284,12 +286,22 @@ static int io_write(void *ctx, const uint8_t *data, size_t len, int timeout_ms)
     f->resp_len = f->resp_pos = 0;
     f->raw_left = 0;
     command(f, data, len);
+    if (be16(data) == 0xdb20 && f->accepted_start_write_error) {
+        int err = f->accepted_start_write_error;
+        f->accepted_start_write_error = 0;
+        return err;
+    }
     return (int)len;
 }
 
 static int io_read(void *ctx, uint8_t *buf, size_t len, int timeout_ms)
 {
     fake_iclass_t *f = ctx;
+    if (f->pending_read_error) {
+        int err = f->pending_read_error;
+        f->pending_read_error = 0;
+        return err;
+    }
     if (f->resp_pos < f->resp_len) {    // a reply is one transfer
         size_t n = f->resp_len - f->resp_pos;
         if (n > len)

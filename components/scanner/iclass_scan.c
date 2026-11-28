@@ -58,7 +58,7 @@ typedef struct {
     void *user;
     uint8_t *cmd;               // command and reply buffer, CMDBUF_SIZE
     size_t cmd_len, res_len;    // pending command, expected reply length
-    bool command_written;      // the last command reached the device, even if its reply was lost
+    bool command_rejected;    // the last command received an explicit BUSY/FAILED status reply
     uint8_t *chunk;             // image reads, PIXMA_READ_CHUNK
     uint8_t *line;              // raw line being assembled, then the delivered one
     size_t raw_line, line_fill;
@@ -162,11 +162,10 @@ static int exec_tries(scan_t *s, int tries)
         payload[n - 1] = (uint8_t)-sum_bytes(payload, n - 1);
     }
     unsigned code = get_be16(s->cmd);
-    s->command_written = false;
+    s->command_rejected = false;
     int r = write_all(s, s->cmd, s->cmd_len);
     if (r < 0)
         return r;
-    s->command_written = true;
     r = read_reply(s, s->cmd, s->res_len, tries);
     if (r < 0) {
         LOGW("no reply to command %04x: %s", code, pixma_strerror(r));
@@ -174,7 +173,9 @@ static int exec_tries(scan_t *s, int tries)
     }
     if (r < RES_HDR)
         return PIXMA_EPROTO;
-    int err = map_status(get_be16(s->cmd));
+    unsigned status = get_be16(s->cmd);
+    s->command_rejected = status == STATUS_BUSY || status == STATUS_FAILED;
+    int err = map_status(status);
     if (err == PIXMA_OK && (size_t)r != s->res_len)
         err = PIXMA_ECANCELED;      // a bare "ok" header: the command was cut short (SANE)
     else if (err == PIXMA_OK && s->res_len > RES_HDR && sum_bytes(s->cmd + RES_HDR, (size_t)r - RES_HDR) != 0)
@@ -423,9 +424,9 @@ int iclass_scan(const pixma_io_t *io, const pixma_params_t *p, pixma_line_fn lin
         goto out;
     err = exec_short(&s, CMD_START_SESSION);
     if (err < 0) {
-        // An accepted write with no usable reply may have opened our session.
-        // Explicit rejection (including another owner's busy session) must be left alone.
-        if (s.command_written && err != PIXMA_EBUSY && err != PIXMA_ECANCELED) {
+        // A transport error cannot establish whether START_SESSION reached
+        // the device. Only an explicit status rejection rules out our session.
+        if (!s.command_rejected) {
             drain(&s);
             finish(&s);
         }

@@ -21,6 +21,8 @@ typedef struct {
     int corrupt_status;         // > 0: the checksums of status replies from this one (1 = first) on are wrong
     bool mute_start;           // accept the next start, but lose its reply
     bool fail_start_write;     // reject the next start before it reaches the device
+    int accepted_start_write_error; // accept next start, but report this transport write error
+    int start_reply_error;     // transport error on reading next start reply (not a scanner status)
     bool first_block_data;     // malformed first response declares unexpected raw image data
     unsigned fail_aborts;       // bitmask of abort attempts (bit 0 = first) answered failed
     size_t raw_chunk;           // > 0: maximum bytes in a continuation transfer
@@ -41,6 +43,7 @@ typedef struct {
     uint64_t image_bytes, image_total;
     // --- internal
     int stage, blocks;
+    int pending_read_error;
     uint32_t rng;
     uint8_t resp[600];
     size_t resp_len, resp_pos;

@@ -2,9 +2,10 @@
 // scanner, and the JPEG encoder (decoded and compared by tools/check_jpeg.py).
 //
 //   ./scan_host selftest
-//   ./scan_host pixma | iclass [format|retry|sequence|lines|abort|pad]   one protocol's tests
+//   ./scan_host pixma | iclass [format|retry|sequence|lines|abort|pad|transport|cleanup|guards]   one protocol's tests
 //   ./scan_host jpeg <dpi> <w> <h> <quality> out.jpg out.ppm   test page area, encoder only
 //   ./scan_host scan <dpi> <a4|letter> out.jpg out.ppm         full pipeline: protocol + encoder
+#include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -34,6 +35,7 @@ typedef struct {
     int lines, mismatches;
     int stop_after;             // > 0: ask to stop after this many lines
     int white_from;             // > 0: pixels from this x of the scan area on are white (beyond the glass)
+    volatile bool *cancel_at_stop; // raise cancel at stop_after instead of returning stop
     FILE *ppm;
     jpeg_enc_t *jpeg;
 } sink_t;
@@ -58,6 +60,10 @@ static int check_line(void *user, int y, const uint8_t *rgb)
         fwrite(rgb, 3, (size_t)s->w, s->ppm);
     if (s->jpeg && jpeg_enc_add_line(s->jpeg, rgb) < 0)
         return 1;
+    if (s->cancel_at_stop && s->stop_after && s->lines >= s->stop_after) {
+        *s->cancel_at_stop = true;
+        return 0;
+    }
     return s->stop_after && s->lines >= s->stop_after;
 }
 
@@ -235,8 +241,17 @@ static void iclass_expect_clean(fake_iclass_t *f, const char *what)
 }
 
 // one case, or all with NULL
-static void test_iclass(const char *only)
+static bool test_iclass(const char *only)
 {
+    const char *selectors[] = {"format", "retry", "sequence", "lines", "abort", "pad", "transport", "cleanup", "guards"};
+    bool known = !only;
+    for (size_t i = 0; i < sizeof(selectors) / sizeof(selectors[0]); i++)
+        if (only && !strcmp(only, selectors[i]))
+            known = true;
+    if (!known) {
+        fprintf(stderr, "Usage: scan_host iclass [format|retry|sequence|lines|abort|pad|transport|cleanup|guards]\n");
+        return false;
+    }
     bool all = !only;
     if (all || !strcmp(only, "format")) {
         // header, lengths and checksums are checked by the emulator on a whole scan;
@@ -346,6 +361,134 @@ static void test_iclass(const char *only)
             iclass_expect_clean(&f, "abort: failed command");
         }
     }
+    if (all || !strcmp(only, "transport")) {
+        fake_iclass_t f;
+        fake_iclass_init(&f);
+        f.raw_chunk = 37;       // valid short USB transfers inside a declared block
+        sink_t s = {0};
+        pixma_params_t p = {.dpi = 75, .w = 100, .h = 30};
+        int r = iclass_run(&f, p, &s, NULL);
+        CHECK(r == PIXMA_OK && s.lines == p.h && !s.mismatches,
+              "transport: short reads: %s, %d lines", pixma_strerror(r), s.lines);
+        iclass_expect_clean(&f, "transport: short reads");
+
+        fake_iclass_init(&f);
+        f.zero_reads = 100;     // finite backstop also makes the old unbounded loop fail promptly
+        s = (sink_t){0};
+        r = iclass_run(&f, p, &s, NULL);
+        CHECK(r == PIXMA_ETIMEDOUT, "transport: endless ZLPs accepted: %s", pixma_strerror(r));
+        CHECK(f.raw_reads < 20, "transport: ZLP reads not bounded: %d", f.raw_reads);
+        iclass_expect_clean(&f, "transport: ZLP timeout");
+
+        fake_iclass_init(&f);
+        volatile bool cancel = false;
+        f.zero_reads = 100;
+        f.cancel = &cancel;
+        f.cancel_at_read = 1;
+        s = (sink_t){0};
+        r = iclass_run(&f, p, &s, &cancel);
+        CHECK(r == PIXMA_ECANCELED && s.lines == 1,
+              "transport: cancel during ZLPs: %s, %d lines", pixma_strerror(r), s.lines);
+        CHECK(f.raw_reads < 20, "transport: canceled ZLP reads not bounded: %d", f.raw_reads);
+        iclass_expect_clean(&f, "transport: canceled ZLP");
+
+        // A tiny image fits in the last block: the end flags must not hide stop/cancel.
+        p.h = 1;
+        for (int external = 0; external < 2; external++) {
+            fake_iclass_init(&f);
+            cancel = false;
+            s = (sink_t){.stop_after = 1, .cancel_at_stop = external ? &cancel : NULL};
+            r = iclass_run(&f, p, &s, external ? &cancel : NULL);
+            CHECK(r == PIXMA_ECANCELED && s.lines == 1,
+                  "transport: final block %s: %s", external ? "cancel" : "stop", pixma_strerror(r));
+            iclass_expect_clean(&f, "transport: final block stop");
+        }
+
+        // Asking below the glass legitimately clips the height; losing an in-glass line fails.
+        p = (pixma_params_t){.dpi = 75, .w = 100, .y = 870, .h = 20};
+        for (int missing = 0; missing < 2; missing++) {
+            fake_iclass_init(&f);
+            f.short_lines = missing;
+            s = (sink_t){0};
+            r = iclass_run(&f, p, &s, NULL);
+            CHECK(r == (missing ? PIXMA_EPROTO : PIXMA_OK) && s.lines == 7 - missing,
+                  "transport: clipped image missing %d: %s, %d lines", missing, pixma_strerror(r), s.lines);
+            iclass_expect_clean(&f, "transport: clipped image");
+        }
+    }
+    if (all || !strcmp(only, "cleanup")) {
+        fake_iclass_t f;
+        fake_iclass_init(&f);
+        f.fail_command = 0xef20; // both aborts fail and leave the device session open
+        sink_t s = {0};
+        pixma_params_t p = {.dpi = 75, .w = 100, .h = 10};
+        int r = iclass_run(&f, p, &s, NULL);
+        CHECK(r == PIXMA_EBUSY && f.session_open && s.lines == 10,
+              "cleanup: abort failures hidden: %s, session %d", pixma_strerror(r), f.session_open);
+        CHECK(f.errors == 0, "cleanup: %s", f.error);
+        s = (sink_t){0};
+        r = iclass_run(&f, p, &s, NULL);
+        CHECK(r == PIXMA_EBUSY && s.lines == 0 && f.session_open,
+              "cleanup: open session was reused: %s, %d lines", pixma_strerror(r), s.lines);
+        CHECK(f.errors == 0, "cleanup repeat: %s", f.error);
+        // Either acknowledged abort suffices to close the session.
+        for (unsigned failures = 1; failures <= 2; failures++) {
+            fake_iclass_init(&f);
+            f.fail_aborts = failures;
+            s = (sink_t){0};
+            r = iclass_run(&f, p, &s, NULL);
+            CHECK(r == PIXMA_OK && s.lines == 10,
+                  "cleanup: single abort failure %u: %s", failures, pixma_strerror(r));
+            iclass_expect_clean(&f, "cleanup: single abort failure");
+            s = (sink_t){0};
+            r = iclass_run(&f, p, &s, NULL);
+            CHECK(r == PIXMA_OK && s.lines == 10, "cleanup: repeat after recovery: %s", pixma_strerror(r));
+            iclass_expect_clean(&f, "cleanup: repeated scan");
+        }
+    }
+    if (all || !strcmp(only, "guards")) {
+        fake_iclass_t f;
+        fake_iclass_init(&f);
+        sink_t s = {0};
+        pixma_params_t p = {.dpi = INT_MAX, .w = 100, .h = 10};
+        int r = iclass_run(&f, p, &s, NULL);
+        CHECK(r == PIXMA_EINVAL && !f.order[0], "guards: invalid DPI was used: %s", pixma_strerror(r));
+        p.dpi = 75;
+        f.mute_start = true;
+        r = iclass_run(&f, p, &s, NULL);
+        CHECK(r == PIXMA_ETIMEDOUT && f.aborts > 0 && !f.session_open,
+              "guards: lost start reply: %s, aborts %d, open %d", pixma_strerror(r), f.aborts, f.session_open);
+        iclass_expect_clean(&f, "guards: lost start reply");
+        r = iclass_run(&f, p, &s, NULL);
+        CHECK(r == PIXMA_OK && s.lines == 10, "guards: scan after lost start reply: %s", pixma_strerror(r));
+        iclass_expect_clean(&f, "guards: next scan");
+
+        fake_iclass_init(&f);
+        f.fail_start_write = true;
+        r = iclass_run(&f, p, &s, NULL);
+        CHECK(r == PIXMA_EIO && !f.aborts && !f.session_open,
+              "guards: failed start write: %s, aborts %d", pixma_strerror(r), f.aborts);
+        iclass_expect_clean(&f, "guards: start write failed");
+
+        fake_iclass_init(&f);
+        f.first_block_data = true;
+        r = iclass_run(&f, p, &s, NULL);
+        CHECK(r == PIXMA_EPROTO && f.raw_reads > 0,
+              "guards: initial image failure not drained: %s, reads %d", pixma_strerror(r), f.raw_reads);
+        iclass_expect_clean(&f, "guards: malformed initial response");
+
+        // The emulator must reject malformed initial requests, including reserved fields.
+        const int bytes[] = {2, 3, 4, 5, 6, 7, 8, 9, 10};
+        for (size_t i = 0; i < sizeof(bytes) / sizeof(bytes[0]); i++) {
+            fake_iclass_init(&f);
+            f.stage = 3;
+            uint8_t req[11] = {0xd4, 0x60, 0, 0, 0, 0, 0, 0, 0, 0, 6};
+            req[bytes[i]] = 1;
+            pixma_io_t io = fake_iclass_io(&f);
+            io.write(io.ctx, req, sizeof(req), 1000);
+            CHECK(f.errors > 0, "guards: emulator accepted bad initial request byte %d", bytes[i]);
+        }
+    }
     if (all || !strcmp(only, "pad")) {
         // Letter at 600 dpi is 5100 px wide, the glass 5096: the last columns are white
         fake_iclass_t f;
@@ -357,6 +500,7 @@ static void test_iclass(const char *only)
         CHECK(f.x + f.wx <= ICLASS_MAX_WIDTH_75 * 600 / 75 + 31, "pad: asked for %d px from %d", f.wx, f.x);
         iclass_expect_clean(&f, "pad");
     }
+    return true;
 }
 
 int main(int argc, char **argv)
@@ -367,7 +511,8 @@ int main(int argc, char **argv)
         return s_fail ? 1 : 0;
     }
     if (argc >= 2 && !strcmp(argv[1], "iclass")) {
-        test_iclass(argc >= 3 ? argv[2] : NULL);
+        if (!test_iclass(argc >= 3 ? argv[2] : NULL))
+            return 2;
         printf(s_fail ? "%d FAILED\n" : "iclass: all passed\n", s_fail);
         return s_fail ? 1 : 0;
     }

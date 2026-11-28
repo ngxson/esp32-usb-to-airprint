@@ -383,7 +383,7 @@ For a board left at the printer without a USB cable: normal printing and scannin
 - The ESP-IDF WiFi driver logs the SSID at info level. Its log level is set to warn so the network name doesn't end up in logs.
 - The app partitions start at `0x20000` (OTA layout); the bootloader with rollback is 22.6 KB (limit 32 KB before the partition table at 0x8000).
 - A serial port can only be opened by one program: a log reader from another session blocked a USB flash ("device reports readiness to read but returned no data").
-- 2026-11-27: on this Mac every AddressSanitizer binary hangs at startup (even a hello world built with `cc -fsanitize=address`), so the host tests built with the Makefile's default `CFLAGS` never finish. Build them with UBSan only until that is fixed: `make -C host CFLAGS="-O2 -g -Wall -Wextra -Wno-unused-parameter -fsanitize=undefined -ffp-contract=off"`.
+- 2026-11-27: on this Mac every AddressSanitizer binary hangs at startup (even a hello world built with `cc -fsanitize=address`), so the host tests built with the Makefile's default `CFLAGS` never finish. Build them with UBSan only until that is fixed: `make -B -C host CFLAGS="-O2 -g -Wall -Wextra -Wno-unused-parameter -fsanitize=undefined -ffp-contract=off"`.
 - Shell (zsh) traps when scripting: unmatched globs abort the command (`setopt null_glob`), there is no `timeout`, `log` is a builtin, `$VAR` holding a command with arguments is not split, and macOS `sed` has no `\b` (use perl).
 
 ## Investigated and parked

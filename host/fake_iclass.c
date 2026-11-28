@@ -78,6 +78,16 @@ static uint32_t rnd(fake_iclass_t *f)
 
 static void image_request(fake_iclass_t *f, const uint8_t *d)
 {
+    for (int i = 2; i < 10; i++) {
+        if (i != 8 && d[i]) {
+            violation(f, "image request reserved byte %d is %02x", i, d[i]);
+            return;
+        }
+    }
+    if ((d[8] != 0 && d[8] != 4) || d[10] != 0x06) {
+        violation(f, "image request flags %02x %02x", d[8], d[10]);
+        return;
+    }
     if (d[8] == 0) {
         note(f, '0');
         if (f->stage != 3)
@@ -85,11 +95,14 @@ static void image_request(fake_iclass_t *f, const uint8_t *d)
         f->stage = 4;
         reply(f, 0x0606, 6);    // 8-byte header, no data
         memset(f->resp + 2, 0, 6);
+        if (f->first_block_data) {
+            f->resp[6] = 3;
+            f->resp[7] = 0xe8;  // 1000 bytes, not allowed on the initial request
+            f->raw_left = 1000;
+        }
         return;
     }
     note(f, 'I');
-    if (d[8] != 4 || d[10] != 0x06)
-        violation(f, "image request flags %02x %02x", d[8], d[10]);
     if (f->stage != 4)
         violation(f, "image request out of order (stage %d)", f->stage);
     memset(f->resp, 0, 8);
@@ -164,6 +177,12 @@ static void command(fake_iclass_t *f, const uint8_t *d, size_t len)
         note(f, 's');
         return;     // no reply: the host times out
     }
+    if (code == 0xef20 && f->aborts < 32 && (f->fail_aborts & (1u << f->aborts))) {
+        note(f, 'F');
+        f->aborts++;
+        reply(f, 0x1515, 0);
+        return;
+    }
     if (code == f->fail_command || code == f->cut_command) {
         note(f, code == f->fail_command ? 'F' : 'C');
         reply(f, code == f->fail_command ? 0x1515 : 0x0606, 0);
@@ -194,14 +213,20 @@ static void command(fake_iclass_t *f, const uint8_t *d, size_t len)
         return;
     case 0xdb20:
         note(f, 'B');
-        if (f->session_open)
-            violation(f, "start session while one is open");
+        if (f->session_open) {
+            reply(f, 0x1414, 0);     // an existing session belongs to its current owner
+            return;
+        }
         f->session_open = true;
         f->stage = 1;
         f->image_bytes = f->image_total = 0;
         f->raw_left = 0;
         f->blocks = 0;
         reply(f, 0x0606, 0);
+        if (f->mute_start) {
+            f->mute_start = false;
+            f->resp_len = 0;
+        }
         return;
     case 0xdd20:
         note(f, 'R');
@@ -229,7 +254,7 @@ static void command(fake_iclass_t *f, const uint8_t *d, size_t len)
             violation(f, "area %d+%d x %d+%d beyond the glass at %d dpi", f->x, f->wx, f->y, f->h, f->dpi);
         if (p[0x18] != 0x08 || p[0x19] != 24 || p[0x1f] != 0x7f || p[0x20] != 0xff || p[0x23] != 0x81)
             violation(f, "scan parameters: mode %02x bpp %d", p[0x18], p[0x19]);
-        f->image_total = (uint64_t)f->wx * 3 * f->h;
+        f->image_total = (uint64_t)f->wx * 3 * (f->h - f->short_lines);
         f->stage = 3;
         reply(f, 0x0606, 0);
         return;
@@ -248,7 +273,12 @@ static void command(fake_iclass_t *f, const uint8_t *d, size_t len)
 static int io_write(void *ctx, const uint8_t *data, size_t len, int timeout_ms)
 {
     fake_iclass_t *f = ctx;
-    if (f->resp_pos < f->resp_len || f->raw_left)
+    if (be16(data) == 0xdb20 && f->fail_start_write) {
+        f->fail_start_write = false;
+        return PIXMA_EIO;
+    }
+    // SANE finishes an interrupted scan by aborting, including during raw data.
+    if ((f->resp_pos < f->resp_len || f->raw_left) && be16(data) != 0xef20)
         violation(f, "command %04x while %zu reply bytes are unread", be16(data),
                   (f->resp_len - f->resp_pos) + (size_t)f->raw_left);
     f->resp_len = f->resp_pos = 0;
@@ -269,7 +299,16 @@ static int io_read(void *ctx, uint8_t *buf, size_t len, int timeout_ms)
         return (int)n;
     }
     if (f->raw_left) {
+        f->raw_reads++;
+        if (f->cancel && f->raw_reads == f->cancel_at_read)
+            *f->cancel = true;
+        if (f->zero_reads > 0) {
+            f->zero_reads--;
+            return 0;
+        }
         size_t n = f->raw_left < len ? (size_t)f->raw_left : len;
+        if (f->raw_chunk && n > f->raw_chunk)
+            n = f->raw_chunk;
         for (size_t i = 0; i < n; i++)
             buf[i] = fake_iclass_byte(f, f->image_bytes + i);
         f->image_bytes += n;

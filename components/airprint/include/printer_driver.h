@@ -40,7 +40,7 @@ typedef struct {
     int (*write)(void *ctx, const uint8_t *data, size_t len);
     // optional: flush, then wait for the printer's reply to `what` (e.g.
     // Canon's "StartJob"); < 0 = the printer is gone. Drivers carry on
-    // without a reply.
+    // without a reply. NULL requests a flush only, without waiting for a reply.
     int (*sync)(void *ctx, const char *what);
     // optional: called every 64 lines of a test page (yield, log progress)
     void (*progress)(void *ctx, int line, int lines);

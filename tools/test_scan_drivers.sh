@@ -23,6 +23,13 @@ judge() {   # jpeg, protocol, what, log
         say "  $3: FAIL: ${closed:-no scan}"
     elif [ "$size done" != "$want" ]; then
         say "  $3: FAIL: JPEG $size, status $want"
+    elif [ -n "${5:-}" ] && ! echo "$st" | python3 -c '
+import json,sys
+s=json.load(sys.stdin)
+sys.exit(not (s["id"] and s["id"] != sys.argv[1] and s["source"] == "button"
+              and s["dpi"] == 150 and s["paper"] == "a4"
+              and (s["width"], s["height"]) == (1240, 1754)))' "$5"; then
+        say "  $3: FAIL: no new button A4 150 dpi scan"
     else
         say "  $3: ok ($size)"
     fi
@@ -33,6 +40,17 @@ wait_done() {
         curl -s $W/scan/status | grep -q '"state":"scanning"' || return 0
         sleep 0.1
     done
+}
+
+wait_new_button() {
+    for _ in $(seq 50); do
+        curl -s $W/scan/status | python3 -c '
+import json,sys
+s=json.load(sys.stdin)
+sys.exit(not (s["id"] and s["id"] != sys.argv[1] and s["source"] == "button"))' "$1" && return 0
+        sleep 0.1
+    done
+    return 1
 }
 
 check() {   # driver, expected scanner ("imageCLASS", "PIXMA" or "none"), all paths (1) or one
@@ -53,10 +71,15 @@ check() {   # driver, expected scanner ("imageCLASS", "PIXMA" or "none"), all pa
             sleep 0.2; wait_done
             curl -s -o $OUT/s.jpg $W/scan/last.jpg
             judge $OUT/s.jpg $2 "kept Letter 300 dpi" $log
+            local previous; previous=$(curl -s $W/scan/status | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
             kill -USR1 $pid      # the button: a kept 150 dpi A4 scan
-            sleep 0.5; wait_done
-            curl -s -o $OUT/s.jpg $W/scan/last.jpg
-            judge $OUT/s.jpg $2 "button" $log
+            if wait_new_button "$previous"; then
+                wait_done
+                curl -s -o $OUT/s.jpg $W/scan/last.jpg
+                judge $OUT/s.jpg $2 "button" $log "$previous"
+            else
+                say "  button: FAIL: no new button scan"
+            fi
             # eSCL: a 5 x 4 in region at 300 dpi
             local set='<scan:ScanSettings xmlns:scan="http://schemas.hp.com/imaging/escl/2011/05/03" xmlns:pwg="http://www.pwg.org/schemas/2010/12/sm"><pwg:Version>2.0</pwg:Version><pwg:ScanRegions><pwg:ScanRegion><pwg:ContentRegionUnits>escl:ThreeHundredthsOfInches</pwg:ContentRegionUnits><pwg:Width>1500</pwg:Width><pwg:Height>1200</pwg:Height><pwg:XOffset>300</pwg:XOffset><pwg:YOffset>150</pwg:YOffset></pwg:ScanRegion></pwg:ScanRegions><pwg:DocumentFormat>image/jpeg</pwg:DocumentFormat><pwg:InputSource>Platen</pwg:InputSource><scan:ColorMode>RGB24</scan:ColorMode><scan:XResolution>300</scan:XResolution><scan:YResolution>300</scan:YResolution></scan:ScanSettings>'
             local job; job=$(curl -s -D - -o /dev/null --data "$set" $W/eSCL/ScanJobs | tr -d '\r' | awk '/^Location:/ {print $2}')

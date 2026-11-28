@@ -27,6 +27,10 @@ host/oled_host
 host/oled_host.dSYM/
 host/ufr2_host
 host/ufr2_host.dSYM/
+host/airprint_jobs_test
+host/airprint_jobs_test.dSYM/
+host/ufr2_failure_test
+host/ufr2_failure_test.dSYM/
 host/out/
 host/*.prn
 host/*.png

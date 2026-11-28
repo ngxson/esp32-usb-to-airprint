@@ -117,7 +117,8 @@ static void cpca(job_t *j, int op, int kind, const uint8_t *p, size_t len)
 {
     uint8_t h[20] = {0xcd, 0xca, 0x10, kind, op >> 8, op & 0xff, 0x00, 0x01, len >> 8, len & 0xff, 0xff, 0xff};
     put(j, h, sizeof(h));
-    put(j, p, len);
+    if (len)
+        put(j, p, len);
 }
 
 #define CPCA(j, op, ...) cpca(j, op, 0, (const uint8_t[]){__VA_ARGS__}, sizeof((const uint8_t[]){__VA_ARGS__}))
@@ -278,6 +279,8 @@ static void job_trailer(job_t *j)
 
 static void band_byte(job_t *j, uint8_t b)
 {
+    if (j->err)
+        return;
     if (j->band_len == j->band_cap) {
         size_t cap = j->band_cap ? 2 * j->band_cap : 65536;
         uint8_t *p = realloc(j->band, cap);
@@ -379,7 +382,7 @@ static void qm_flush(job_t *j)
 static void code_white_run(job_t *j, uint32_t n)
 {
     uint8_t *s = &j->st[0];
-    while (n) {
+    while (n && !j->err) {
         if (*s >> 7) {                  // white is the less probable symbol here
             qm_code(j, 0, 0);
             n--;
@@ -402,7 +405,7 @@ static void code_line(job_t *j, const uint8_t *cur, const uint8_t *up)
 {
     uint32_t c4 = 0;                    // current line: x-4 .. x-1
     int lb = j->lb;
-    for (int i = 0; i < lb; i++) {
+    for (int i = 0; i < lb && !j->err; i++) {
         uint32_t w = (i ? up[i - 1] << 16 : 0) | up[i] << 8 | (i + 1 < lb ? up[i + 1] : 0);
         uint32_t b = cur[i];
         if (!(w | b | c4)) {            // white on white: context 0 while it lasts
@@ -413,7 +416,7 @@ static void code_line(job_t *j, const uint8_t *cur, const uint8_t *up)
             i += r - 1;
             continue;
         }
-        for (int k = 0; k < 8; k++) {
+        for (int k = 0; k < 8 && !j->err; k++) {
             int p = (b >> (7 - k)) & 1;
             // line above: x-3 .. x+2, then the current line
             qm_code(j, ((w >> (13 - k)) & 0x3f) << 4 | c4, p);
@@ -426,6 +429,8 @@ static void code_line(job_t *j, const uint8_t *cur, const uint8_t *up)
 // SDRST sees white above it and starts its typical prediction afresh.
 static void encode_stripe(job_t *j)
 {
+    if (j->err)
+        return;
     j->c = 0;
     j->a = 0x10000;
     j->ct = 11;
@@ -434,7 +439,7 @@ static void encode_stripe(job_t *j)
     size_t start = j->band_len;
     const uint8_t *up = j->reset ? j->white : j->above;
     int ltp_old = j->reset ? 0 : !memcmp(j->above, j->above2, j->lb);
-    for (int y = 0; y < j->n; y++) {
+    for (int y = 0; y < j->n && !j->err; y++) {
         const uint8_t *cur = j->lines + (size_t)y * j->lb;
         int ltp = !memcmp(cur, up, j->lb);
         qm_code(j, TPB2CX, ltp == ltp_old);
@@ -443,6 +448,8 @@ static void encode_stripe(job_t *j)
             code_line(j, cur, up);
         up = cur;
     }
+    if (j->err)
+        return;
     qm_flush(j);
     // trailing 0x00 bytes are implied (T.82 decoders read 0x00 past the
     // end); a 0xff left last keeps its stuffing
@@ -711,6 +718,10 @@ static int job_end(void *job)
     if (j->in_page)
         page_end(j);    // a cancelled page still comes out
     job_trailer(j);
+    // UFR II has no PIXMA EndJob reply, but the last USB buffer must arrive
+    // before the caller can report success. NULL requests only a flush.
+    if (!j->err && j->io.sync && j->io.sync(j->io.ctx, NULL) < 0)
+        j->err = -1;
     int ret = j->err ? -1 : 0;
     free_page(j);
     free(j->band);

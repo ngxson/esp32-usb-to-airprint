@@ -19,6 +19,16 @@ typedef struct {
     unsigned cut_command;       // this command code is answered with a bare "ok" (cut short)
     int mute_status;            // the first this many status commands get no reply
     int corrupt_status;         // > 0: the checksums of status replies from this one (1 = first) on are wrong
+    bool mute_start;           // accept the next start, but lose its reply
+    bool fail_start_write;     // reject the next start before it reaches the device
+    bool first_block_data;     // malformed first response declares unexpected raw image data
+    unsigned fail_aborts;       // bitmask of abort attempts (bit 0 = first) answered failed
+    size_t raw_chunk;           // > 0: maximum bytes in a continuation transfer
+    int zero_reads;             // continuation transfers returning zero before data
+    int raw_reads;              // continuation read calls (including empty transfers)
+    volatile bool *cancel;     // optional cancellation raised at cancel_at_read
+    int cancel_at_read;
+    int short_lines;            // > 0: omit this many complete lines from the image
     // --- results
     int errors;                 // protocol violations
     char error[160];            // the first one

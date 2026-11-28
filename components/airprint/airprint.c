@@ -932,6 +932,11 @@ static int pipe_page_begin(void *user, const raster_page_t *pg)
     const printer_driver_t *d = s_cfg->driver;
     if (p->job->cancel)
         return 1;
+    if (p->job->sides != PRINTER_SIDES_ONE && !d->duplex) {
+        LOGW("job %d: the attached printer no longer supports duplex", p->job->id);
+        p->err = IPP_ATTRIBUTES_NOT_SUPPORTED;
+        return 2;
+    }
     if (!printer_driver_has_dpi(d, pg->dpi)) {
         LOGW("page %d: unsupported resolution %d dpi", pg->page, pg->dpi);
         p->err = IPP_DOCUMENT_FORMAT_ERROR;
@@ -1034,7 +1039,7 @@ static int print_document(conn_t *c, job_t *j)
          (p->render_us - p->out_us) / 1e6, (t_total - rd.wait_us - p->render_us) / 1e6);
 
     bool canceled = j->cancel;
-    bool ok = r > 0 && !canceled;
+    bool ok = r > 0 && !canceled && !p->err;
     bool link_ok = true;
     if (p->drv_job) {
         // the driver finishes the job whatever happened (cancel, bad data,

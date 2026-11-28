@@ -462,6 +462,8 @@ static esp_err_t raw_post(httpd_req_t *req)
             err = "printer write failed";
         done += n;
     }
+    if (!err && usb_printer_flush() != ESP_OK)
+        err = "printer flush failed";
     usb_printer_job_end();
     free(buf);
     ESP_LOGI(TAG, "raw job: %u bytes in %.1f s%s%s", (unsigned)done, (esp_timer_get_time() - t0) / 1e6,

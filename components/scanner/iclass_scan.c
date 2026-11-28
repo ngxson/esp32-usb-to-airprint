@@ -58,6 +58,7 @@ typedef struct {
     void *user;
     uint8_t *cmd;               // command and reply buffer, CMDBUF_SIZE
     size_t cmd_len, res_len;    // pending command, expected reply length
+    bool command_written;      // the last command reached the device, even if its reply was lost
     uint8_t *chunk;             // image reads, PIXMA_READ_CHUNK
     uint8_t *line;              // raw line being assembled, then the delivered one
     size_t raw_line, line_fill;
@@ -161,9 +162,11 @@ static int exec_tries(scan_t *s, int tries)
         payload[n - 1] = (uint8_t)-sum_bytes(payload, n - 1);
     }
     unsigned code = get_be16(s->cmd);
+    s->command_written = false;
     int r = write_all(s, s->cmd, s->cmd_len);
     if (r < 0)
         return r;
+    s->command_written = true;
     r = read_reply(s, s->cmd, s->res_len, tries);
     if (r < 0) {
         LOGW("no reply to command %04x: %s", code, pixma_strerror(r));
@@ -209,11 +212,19 @@ static bool has_paper(const scan_t *s)
 }
 
 // Reads and discards whatever the scanner still sends.
-static void drain(scan_t *s)
+static bool drain(scan_t *s)
 {
-    for (int i = 0; i < 2048; i++)
-        if (s->io->read(s->io->ctx, s->chunk, PIXMA_READ_CHUNK, IO_TIMEOUT_MS) < 0)
-            break;
+    int zlp = 0;
+    for (int i = 0; i < 2048; i++) {
+        int r = s->io->read(s->io->ctx, s->chunk, PIXMA_READ_CHUNK, IO_TIMEOUT_MS);
+        if (r < 0)
+            return r == PIXMA_ETIMEDOUT;
+        if (r == 0 && ++zlp > MAX_ZLP)
+            return false;
+        if (r > 0)
+            zlp = 0;
+    }
+    return false;
 }
 
 // ---------------------------------------------------------------------------
@@ -259,7 +270,7 @@ static void feed(scan_t *s, const uint8_t *data, size_t n)
         n -= k;
         if (s->line_fill == s->raw_line) {
             s->line_fill = 0;
-            if (s->lines < s->h && !s->stop) {
+            if (s->lines < s->h && !s->stop && !canceled(s)) {
                 // columns past the glass: white
                 memset(s->line + 3 * s->w, 0xff, 3 * (size_t)(s->p->w - s->w));
                 if (s->line_cb(s->user, s->lines, s->line))
@@ -304,8 +315,10 @@ static int read_block(scan_t *s, uint8_t flag)
     s->last_flags = info & 0x38;
     feed(s, s->chunk + BLOCK_HDR, have);
     uint32_t left = len - have;
-    int tries = RESPONSE_TRIES;
+    int tries = RESPONSE_TRIES, zlp = 0;
     while (left) {
+        if (canceled(s) || s->stop)
+            return PIXMA_ECANCELED;
         // SANE reads 16 KB pieces (generation 2), multiples of 512
         size_t n = left < PIXMA_READ_CHUNK ? left : PIXMA_READ_CHUNK;
         r = s->io->read(s->io->ctx, s->chunk, n, IO_TIMEOUT_MS);
@@ -313,14 +326,17 @@ static int read_block(scan_t *s, uint8_t flag)
             continue;
         if (r < 0)
             return r;
-        if (r == 0)
-            continue;   // stray zero-length packet
-        feed(s, s->chunk, (size_t)r);
-        left -= (uint32_t)r;
-        if ((size_t)r < n && left) {
-            LOGW("image block ended early: %u bytes missing", (unsigned)left);
-            return PIXMA_EPROTO;
+        if (r == 0) {
+            if (++zlp > MAX_ZLP)
+                return PIXMA_ETIMEDOUT;
+            continue;           // stray zero-length packet
         }
+        if ((size_t)r > n)
+            return PIXMA_EPROTO;
+        tries = RESPONSE_TRIES;
+        zlp = 0;
+        feed(s, s->chunk, (size_t)r);
+        left -= (uint32_t)r;     // short transfers can continue the same block
     }
     return (int)len;
 }
@@ -334,9 +350,12 @@ static int read_image(scan_t *s)
             return PIXMA_ECANCELED;
         int r = read_block(s, 4);
         if (r < 0) {
-            // seen in traffic logs after a failed block (SANE: meaning unknown)
-            new_cmd(s, CMD_ERROR_INFO, 0, 16);
-            exec(s);
+            bool drained = drain(s); // consume remaining raw data before another command
+            if (drained && !canceled(s) && !s->stop) {
+                // seen in traffic logs after a failed block (SANE: meaning unknown)
+                new_cmd(s, CMD_ERROR_INFO, 0, 16);
+                exec(s);
+            }
             return r;
         }
         if (r == 0 && !s->last_flags) {
@@ -347,13 +366,13 @@ static int read_image(scan_t *s)
             idle_ms = 0;
         }
     }
-    return PIXMA_OK;
+    return canceled(s) || s->stop ? PIXMA_ECANCELED : PIXMA_OK;
 }
 
 // iclass_finish_scan: abort, read the status twice, abort again. SANE sends
 // the second abort only when the ADF has nothing left to feed (else it waits
 // for the next sheet); a flatbed scan has no next sheet, so it always goes.
-static void finish(scan_t *s)
+static int finish(scan_t *s)
 {
     int e1 = exec_short(s, CMD_ABORT_SESSION);
     query_status(s, RESPONSE_TRIES);
@@ -362,6 +381,13 @@ static void finish(scan_t *s)
     LOGI("session ended: abort %s, status %s (%02x %02x %02x %02x %02x %02x %02x %02x, ADF paper %d), abort %s",
          pixma_strerror(e1), pixma_strerror(e2), s->status[0], s->status[1], s->status[2], s->status[3], s->status[4],
          s->status[5], s->status[6], s->status[7], has_paper(s), pixma_strerror(e3));
+    // Either acknowledged abort releases the flatbed session. If both fail,
+    // a device rejection means busy, rather than a user-requested cancellation.
+    if (e1 >= 0 || e3 >= 0)
+        return PIXMA_OK;
+    if (e1 == PIXMA_ECANCELED && e3 == PIXMA_ECANCELED)
+        return PIXMA_EBUSY;
+    return e3 != PIXMA_ECANCELED ? e3 : e1;
 }
 
 // ---------------------------------------------------------------------------
@@ -369,9 +395,10 @@ static void finish(scan_t *s)
 int iclass_scan(const pixma_io_t *io, const pixma_params_t *p, pixma_line_fn line, void *user,
                 volatile bool *cancel)
 {
+    if (p->dpi != 75 && p->dpi != 150 && p->dpi != 300 && p->dpi != 600)
+        return PIXMA_EINVAL;
     int max_w = ICLASS_MAX_WIDTH_75 * p->dpi / 75, max_h = ICLASS_MAX_HEIGHT_75 * p->dpi / 75;
-    if ((p->dpi != 75 && p->dpi != 150 && p->dpi != 300 && p->dpi != 600) || p->x < 0 || p->y < 0 || p->w <= 0 ||
-        p->h <= 0 || p->x >= max_w || p->y >= max_h)
+    if (p->x < 0 || p->y < 0 || p->w <= 0 || p->h <= 0 || p->x >= max_w || p->y >= max_h)
         return PIXMA_EINVAL;
 
     scan_t s = {.io = io, .p = p, .cancel = cancel, .line_cb = line, .user = user};
@@ -395,22 +422,33 @@ int iclass_scan(const pixma_io_t *io, const pixma_params_t *p, pixma_line_fn lin
     if (err < 0)
         goto out;
     err = exec_short(&s, CMD_START_SESSION);
-    if (err < 0)
+    if (err < 0) {
+        // An accepted write with no usable reply may have opened our session.
+        // Explicit rejection (including another owner's busy session) must be left alone.
+        if (s.command_written && err != PIXMA_EBUSY && err != PIXMA_ECANCELED) {
+            drain(&s);
+            finish(&s);
+        }
         goto out;
+    }
     // from here on the session is ended, whatever happens
     err = select_source(&s);
     if (err >= 0)
         err = send_scan_param(&s);
-    if (err >= 0)
-        err = read_block(&s, 0);
     if (err >= 0) {
-        err = read_image(&s);
-        if (err < 0 && err != PIXMA_ECANCELED)
-            drain(&s);          // a transfer may have been cut off
+        err = read_block(&s, 0);
+        if (err < 0)
+            drain(&s);
     }
-    if (err >= 0 && s.lines < s.h)
+    if (err >= 0)
+        err = read_image(&s);
+    if (err >= 0 && s.lines < s.h) {
         LOGW("short image: %d of %d lines", s.lines, s.h);
-    finish(&s);
+        err = PIXMA_EPROTO;
+    }
+    int cleanup = finish(&s);
+    if (err >= 0)
+        err = cleanup;
 out:
     if (err < 0)
         LOGW("scan ended: %s after %d lines", pixma_strerror(err), s.lines);

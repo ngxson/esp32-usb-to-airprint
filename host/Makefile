@@ -14,7 +14,7 @@ INC = -I../components/canon_bjl/include -I../components/airprint/include -I../co
       -I../components/scanner/include -I../components/scanner -I../components/webui/include \
       -I../components/oled/include -I../components/printers
 
-all: bjl_host airprint_host scan_host oled_host ufr2_host
+all: bjl_host airprint_host scan_host oled_host ufr2_host airprint_jobs_test ufr2_failure_test
 
 bjl_host: bjl_host.c $(BJL) $(PRINTERS) ../components/airprint/printer_driver.c ../components/canon_bjl/include/*.h \
           ../components/airprint/include/printer_driver.h
@@ -31,7 +31,7 @@ airprint_host: airprint_host.c fake_iclass.c fake_iclass.h $(BJL) $(AIRPRINT) $(
 FORCE:
 .PHONY: all clean FORCE
 
-ufr2_host: ufr2_host.c $(PRINTERS) ../components/airprint/printer_driver.c ../components/printers/*.h \
+ufr2_host: ufr2_host.c $(BJL) $(PRINTERS) ../components/airprint/printer_driver.c ../components/printers/*.h \
            ../components/airprint/include/printer_driver.h
 	$(CC) $(UFR2_CFLAGS) $(INC) ufr2_host.c $(PRINTERS) $(BJL) ../components/airprint/printer_driver.c -lm -o $@
 # without the sanitizers: they make its 70-megapixel round trips take half an hour
@@ -44,5 +44,11 @@ oled_host: oled_host.c $(OLED) ../components/oled/include/*.h ../components/airp
            ../components/scanner/include/*.h
 	$(CC) $(CFLAGS) $(INC) oled_host.c $(OLED) -o $@
 
+airprint_jobs_test: airprint_jobs_test.c $(AIRPRINT) $(PRINTERS) $(BJL) ../components/airprint/include/*.h
+	$(CC) $(CFLAGS) $(INC) airprint_jobs_test.c $(filter-out ../components/airprint/airprint.c,$(AIRPRINT)) $(PRINTERS) $(BJL) -lm -lpthread -o $@
+
+ufr2_failure_test: ufr2_failure_test.c ../components/printers/canon_ufr2.c ../components/printers/canon_ufr2.h ../components/airprint/include/printer_driver.h
+	$(CC) $(CFLAGS) $(INC) ufr2_failure_test.c -o $@
+
 clean:
-	rm -rf bjl_host airprint_host scan_host oled_host ufr2_host out *.prn *.png *.raw
+	rm -rf bjl_host airprint_host scan_host oled_host ufr2_host airprint_jobs_test ufr2_failure_test out *.prn *.png
